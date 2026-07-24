@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1b1035"/>
+      <stop offset="45%" stop-color="#7b2d6b"/>
+      <stop offset="75%" stop-color="#f2703c"/>
+      <stop offset="100%" stop-color="#ffd166"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#fff6d6"/>
+      <stop offset="60%" stop-color="#ffd166"/>
+      <stop offset="100%" stop-color="#ffd166" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="m1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a1b4d"/>
+      <stop offset="100%" stop-color="#160f2b"/>
+    </linearGradient>
+    <linearGradient id="m2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3c2566"/>
+      <stop offset="100%" stop-color="#1f1440"/>
+    </linearGradient>
+    <linearGradient id="m3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#553281"/>
+      <stop offset="100%" stop-color="#2c1c52"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="480" fill="url(#sky)"/>
+  <circle cx="320" cy="260" r="150" fill="url(#sun)"/>
+  <circle cx="320" cy="260" r="70" fill="#fff1c4"/>
+  <path d="M0,420 L90,300 L150,360 L230,260 L300,360 L360,300 L420,380 L480,300 L560,380 L640,320 L640,480 L0,480 Z" fill="url(#m3)"/>
+  <path d="M0,460 L110,340 L200,410 L300,320 L380,410 L470,330 L560,420 L640,360 L640,480 L0,480 Z" fill="url(#m2)"/>
+  <path d="M0,480 L130,390 L230,440 L340,370 L440,440 L540,380 L640,440 L640,480 Z" fill="url(#m1)"/>
+</svg>
