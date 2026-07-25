@@ -38,7 +38,7 @@
  * Dependency-free: types and tiny pure helpers only.
  */
 
-import type { EncoderId, AnyEncoderOptions } from './codecs';
+import type { BrowserEncoderId, EncoderId, AnyEncoderOptions } from './codecs';
 import type { SourceImage } from './image';
 import type { PreprocessorState, ProcessorState, SideSettings } from './processing';
 
@@ -83,6 +83,12 @@ export interface SideOutput {
   latestSettings: SideSettings;
   /** Human-readable failure from the last attempt. Cleared on the next success. */
   error?: string;
+  /**
+   * Set when the wasm codec worker failed and this side fell back to the named
+   * canvas encoder. The output is a valid file but not byte-identical to the
+   * wasm codec — the UI flags it. Cleared whenever the wasm path succeeds.
+   */
+  encoderFallback?: BrowserEncoderId;
 }
 
 /** Whole-engine reactive state. */
@@ -233,6 +239,45 @@ export function createAbortError(): DOMException {
 
 export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+/**
+ * The codec worker never finished loading (bad chunk, top-level throw, a
+ * sub-resource blocked by COEP, …). Comlink calls to such a worker never settle
+ * on their own, so the bridge listens for the worker's `error`/`messageerror`
+ * and rejects everything in flight with this instead of hanging forever.
+ */
+export class WorkerLoadError extends Error {
+  constructor(
+    message = 'The codec worker failed to load. Reload the page and try again.',
+  ) {
+    super(message);
+    this.name = 'WorkerLoadError';
+  }
+}
+
+/**
+ * The worker loaded but an encode/decode call produced no result within the
+ * bridge's watchdog window (typically a wasm-threads deadlock). The bridge
+ * terminates the worker and rejects the call with this.
+ */
+export class WorkerTimeoutError extends Error {
+  constructor(message = 'Encoding timed out — the codec worker stopped responding.') {
+    super(message);
+    this.name = 'WorkerTimeoutError';
+  }
+}
+
+/**
+ * A worker failure the caller can recover from (surface an error, or fall back
+ * to a browser encoder). Distinct from {@link isAbortError}, which must stay
+ * silent because the user or a newer job caused it.
+ */
+export function isWorkerFailure(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === 'WorkerLoadError' || error.name === 'WorkerTimeoutError')
+  );
 }
 
 /** Throw immediately if the signal has already fired. Call at every step entry. */

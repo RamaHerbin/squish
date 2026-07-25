@@ -40,11 +40,23 @@ export interface TransferableImageData {
   data: Uint8ClampedArray;
   width: number;
   height: number;
+  /**
+   * Colour space of the pixels. Carried across the worker boundary so a
+   * wide-gamut (`display-p3`) image survives a colour-space-neutral resize or
+   * rotate instead of being silently relabelled sRGB on the way back. Absent
+   * means sRGB.
+   */
+  colorSpace?: PredefinedColorSpace;
 }
 
 /** Wrap an `ImageData` without copying pixels. */
 export function toTransferable(image: ImageData): TransferableImageData {
-  return { data: image.data, width: image.width, height: image.height };
+  return {
+    data: image.data,
+    width: image.width,
+    height: image.height,
+    colorSpace: image.colorSpace,
+  };
 }
 
 /** Rebuild an `ImageData` around the payload's buffer, without copying pixels. */
@@ -56,8 +68,11 @@ export function fromTransferable(payload: TransferableImageData): ImageData {
     data: Uint8ClampedArray,
     width: number,
     height: number,
+    settings?: ImageDataSettings,
   ) => ImageData;
-  return new Ctor(payload.data, payload.width, payload.height);
+  return payload.colorSpace
+    ? new Ctor(payload.data, payload.width, payload.height, { colorSpace: payload.colorSpace })
+    : new Ctor(payload.data, payload.width, payload.height);
 }
 
 /** Transfer list for a payload — pass to `Comlink.transfer`. */
@@ -71,6 +86,7 @@ export function cloneTransferable(payload: TransferableImageData): TransferableI
     data: new Uint8ClampedArray(payload.data),
     width: payload.width,
     height: payload.height,
+    colorSpace: payload.colorSpace,
   };
 }
 

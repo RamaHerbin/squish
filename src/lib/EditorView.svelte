@@ -203,7 +203,9 @@
     // OxiPNG's dial is effort, not quality; saying `q2` would be a lie.
     const dial =
       knob.kind === 'quality' ? `q${knob.valueText}` : knob.kind === 'effort' ? `e${knob.valueText}` : '';
-    return [outputEncoderLabel, dial, `${outputSize.width} × ${outputSize.height}`]
+    // The wasm codec failed and a canvas encoder stood in — flag the degraded output.
+    const fallback = st.sides[1].encoderFallback ? 'browser encoder' : '';
+    return [outputEncoderLabel, dial, `${outputSize.width} × ${outputSize.height}`, fallback]
       .filter(Boolean)
       .join(' · ');
   });
@@ -499,6 +501,7 @@
         ? [
             sourceFormatLabel,
             ...(st.source.hdr ? [`${hdrLabel(st.source.hdr)} → SDR`] : []),
+            ...(st.source.decoded.colorSpace === 'display-p3' ? ['P3'] : []),
             `${processedSize.width} × ${processedSize.height}`,
           ].join(' · ')
         : ''}

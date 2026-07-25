@@ -45,6 +45,7 @@ import {
   otherSide,
 } from '../contracts';
 import type {
+  BrowserEncoderId,
   CreateWorkerBridge,
   EncoderRegistry,
   JobEngine,
@@ -566,6 +567,8 @@ export class JobSession implements JobEngine {
       let file: File;
       let data: ImageData;
       let processed: ImageData;
+      // Set only if the wasm worker failed and a canvas encoder stood in.
+      let usedFallback: BrowserEncoderId | undefined;
 
       if (settings.encoderId === 'identity') {
         // Pass-through: the original bytes, and the preprocessed pixels as the
@@ -611,6 +614,9 @@ export class JobSession implements JobEngine {
             this.#bridges[side],
             this.#hooks,
             this.#registry,
+            (id) => {
+              usedFallback = id;
+            },
           );
           assertLive(signal);
 
@@ -638,6 +644,7 @@ export class JobSession implements JobEngine {
       output.downloadUrl = createObjectUrl(file);
       output.encodedSettings = cloneSideSettings(settings);
       output.error = undefined;
+      output.encoderFallback = usedFallback;
       output.loading = false;
       this.#sideProcessed[side] = processed;
       if (this.#activeSideJobs[side]?.settings === settings) {
