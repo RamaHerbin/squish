@@ -15,7 +15,17 @@
   import { onMount } from 'svelte';
 
   import { accentFill, Chip, PillButton, Ticker, type AccentName } from '$lib/ui';
-  import { EXTENSION_BY_MIME, FILE_PICKER_ACCEPT, type ImageMimeType } from '$lib/contracts';
+  import {
+    EXTENSION_BY_MIME,
+    FILE_PICKER_ACCEPT,
+    mimeTypeFromFilename,
+    type ImageMimeType,
+  } from '$lib/contracts';
+
+  /** Real MIME per sample; the response blob's type as fallback, never SVG by default. */
+  function mimeTypeForSample(name: string, blob: Blob): string {
+    return mimeTypeFromFilename(name) || blob.type || 'application/octet-stream';
+  }
   import { formatBytes } from '$lib/batch/format';
 
   /** Below this width the layout stacks per comp section "06a Mobile home". */
@@ -241,7 +251,7 @@
         if (!response.ok) throw new Error(String(response.status));
         blob = await response.blob();
       }
-      onsample(new File([blob], demo.name, { type: 'image/svg+xml' }));
+      onsample(new File([blob], demo.name, { type: mimeTypeForSample(demo.name, blob) }));
     } catch {
       notice = "Couldn't load that sample.";
     } finally {

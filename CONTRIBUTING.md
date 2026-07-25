@@ -16,7 +16,7 @@ The dev server (and `npm run preview`) sends
 `Cross-Origin-Opener-Policy: same-origin` and
 `Cross-Origin-Embedder-Policy: require-corp` on every response. Those headers
 enable `SharedArrayBuffer`, which the threaded wasm codecs (AVIF, JPEG XL,
-WebP) need. If you serve the app through anything else — a different dev
+OxiPNG) need. If you serve the app through anything else — a different dev
 proxy, a static file server for a manual check — those two headers have to be
 present or the threaded codecs silently fall back to single-threaded (or
 fail).
