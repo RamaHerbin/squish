@@ -17,13 +17,15 @@
  *   node scripts/generate-assets.mjs icons og     # a subset
  *
  * Targets: `icons` (+ favicon), `macos` (the Tauri app icon), `og`, `demo`,
- * `shots`. `shots` boots `vite` on a free port and drives the real app, so it
- * is the slow one; the rest are pure rendering and take a couple of seconds.
+ * `hdr`, `shots`. `shots` boots `vite` on a free port and drives the real app,
+ * so it is the slow one; the rest are pure rendering and take a couple of
+ * seconds.
  *
- * `macos` is opt-in and excluded from a bare, argument-less run: it shells
- * out to `iconutil`, which only ships with macOS, so it must be named
- * explicitly (`node scripts/generate-assets.mjs macos`) rather than breaking
- * the default "everything" run for contributors on Linux or Windows.
+ * `macos` and `hdr` are opt-in and excluded from a bare, argument-less run:
+ * they shell out to `iconutil` (macOS only) and `avifenc` (libavif, not an npm
+ * dependency), so they must be named explicitly rather than breaking the
+ * default "everything" run for a contributor who has just cloned and run
+ * `npm install`.
  *
  * Outputs (all overwritten in place, all committed):
  *   public/icons/icon-192.png          192×192   from icon.svg
@@ -36,9 +38,10 @@
  *   src-tauri/icons/128x128.png        128×128   from icon.svg
  *   src-tauri/icons/128x128@2x.png     256×256   from icon.svg
  *   public/og.png                      1200×630  social card
- *   public/demo/demo-gradient.jpg      1600×1200 duotone gradient, JPEG q0.86
+ *   public/demo/demo-gradient.jpg      1600×1200 duotone mountains, JPEG q0.86
  *   public/demo/demo-poster.png        1200×900  geometric poster, PNG
- *   docs/media/home.png                1440×900  app screenshot
+ *   public/demo/demo-hdr.avif          1600×1200 the same mountains, 10-bit PQ
+ *   docs/media/home.png                1440×1010 app screenshot
  *   docs/media/editor.png              1440×900  app screenshot
  */
 
@@ -85,6 +88,52 @@ const POSTER = {
   display: 0.085,
   caption: 0.024,
 };
+
+/**
+ * Geometry of the mountain sample, in pixels, from one set of fractions.
+ *
+ * Shared on purpose: `paintGradient` draws from it and `buildHdr` reads the
+ * two light sources back out of it to decide which pixels are emissive. If the
+ * sun moved in the painter but not in the HDR pass, the AVIF would carry a
+ * 900-nit disc somewhere the artwork has none.
+ */
+function gradientGeometry(w, h, P) {
+  const inset = Math.round(w * P.inset);
+  // `fx` cannot move much further left: the display word, the hairline block
+  // and the caption occupy the column up to about 0.35w.
+  const fx = Math.round(w * 0.355);
+  const fy = Math.round(h * 0.09);
+  return {
+    inset,
+    frame: Math.round(w * P.frame),
+    fx,
+    fy,
+    fw: w - inset - fx,
+    fh: h - inset - fy,
+    // The ridge, in fractions of the field box: x across, y down from its top
+    // edge. Straight segments, not curves — one long hard diagonal per face is
+    // what makes a lossy codec stair-step, and it matches the flat
+    // ink-outlined shapes the rest of the series is built from.
+    ridge: [
+      [0, 0.62],
+      [0.14, 0.3],
+      [0.26, 0.5],
+      [0.44, 0.06],
+      [0.6, 0.44],
+      [0.75, 0.22],
+      [0.86, 0.42],
+      [1, 0.3],
+    ],
+    /** The yellow quarter-disc, read as the sun by the HDR pass. */
+    sun: { x: inset, y: inset, r: Math.round(h * 0.28) },
+    /** The cream disc straddling the ridge, read as the moon. */
+    moon: {
+      x: Math.round(fx + 0.31 * (w - inset - fx)),
+      y: Math.round(fy + 0.36 * (h - inset - fy)),
+      r: Math.round(h * 0.135),
+    },
+  };
+}
 
 /**
  * A canvas draw silently falls back to a system font unless the face is
@@ -158,6 +207,36 @@ function pngSize(bytes) {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
+/**
+ * Read an AVIF's `ispe` box, for the same reason. Bounded scan rather than a
+ * container walk: `ispe` is `version(1) flags(3) width(4) height(4)`, and the
+ * first one in the file belongs to the primary item.
+ */
+function avifSize(bytes) {
+  const at = bytes.indexOf('ispe', 0, 'latin1');
+  if (at === -1 || at + 16 > bytes.length) return null;
+  return { width: bytes.readUInt32BE(at + 8), height: bytes.readUInt32BE(at + 12) };
+}
+
+/**
+ * Read the transfer characteristic out of an ISO-BMFF `colr` box of type
+ * `nclx`. Deliberately the same bounded scan as `scanColrTransfer` in
+ * `src/lib/codecs/hdr.ts`, so the generator asserts on exactly the byte the
+ * app detects HDR from — if these two ever disagree, the assertion is the
+ * thing that should fail.
+ */
+function colrTransfer(bytes) {
+  let at = 0;
+  for (;;) {
+    const hit = bytes.indexOf('colr', at, 'latin1');
+    if (hit === -1) return undefined;
+    if (bytes.indexOf('nclx', hit + 4, 'latin1') === hit + 4) {
+      return bytes.readUInt16BE(hit + 10);
+    }
+    at = hit + 4;
+  }
+}
+
 /** Read a JPEG's first SOF marker for the same reason. */
 function jpegSize(bytes) {
   let offset = 2;
@@ -184,7 +263,8 @@ const report = [];
  */
 function record(file, bytes, expected, label) {
   const relative = path.relative(ROOT, file);
-  const measured = bytes[0] === 0xff ? jpegSize(bytes) : pngSize(bytes);
+  const measured =
+    bytes[0] === 0xff ? jpegSize(bytes) : (pngSize(bytes) ?? avifSize(bytes));
   const size = label ?? (measured ? `${measured.width}×${measured.height}` : 'n/a');
   const kb = (bytes.length / 1024).toFixed(1);
   report.push({ relative, size, bytes: bytes.length });
@@ -431,28 +511,34 @@ async function buildOg(browser, fonts) {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Three synthetic samples to compress, painted as one editorial series on the
- * shared `POSTER` chassis so the home screen reads as a set rather than three
+ * Four synthetic samples to compress, painted as one editorial series on the
+ * shared `POSTER` chassis so the home screen reads as a set rather than four
  * unrelated pictures. Painting them here means the repo owns every byte: no
  * stock photo, no licence question, no download.
  *
  * Each one still covers a different case for the codecs to work on:
  *
- * - `demo-gradient.jpg` — continuous tone. A duotone field, roughly half the
- *   sheet, carrying a diagonal gradient and seeded film grain. Grain is what
- *   makes a file behave like a photograph under a codec — expensive to store,
- *   cheap to lose — so the quality slider has something real to trade against.
- *   Shipped at q0.86, up from the q0.80 the old sunset used: the sheet now has
- *   ink edges on cream, and a demo should not be one codec fighting another
- *   codec's artefacts. Checked against q0.82 and q0.90 by eye at 5× on the
- *   disc outline and the hairline block — q0.90 bought no visible improvement
- *   for its extra 36 KB, and these files sit in the SW precache.
+ * - `demo-gradient.jpg` — continuous tone. A duotone gradient cut into a
+ *   mountain range: a graded sky over about half the sheet, ridges taking a
+ *   bite out of it, and seeded film grain across the whole field. Grain is
+ *   what makes a file behave like a photograph under a codec — expensive to
+ *   store, cheap to lose — so the quality slider has something real to trade
+ *   against, and the ridge line adds the long diagonal hard edge that lossy
+ *   codecs stair-step first. Shipped at q0.86, up from the q0.80 the old
+ *   sunset used: the sheet has ink edges on cream, and a demo should not be
+ *   one codec fighting another codec's artefacts. Checked against q0.82 and
+ *   q0.90 by eye at 5× on the ridge line and the hairline block — q0.90
+ *   bought no visible improvement for its extra weight, and these files sit
+ *   in the SW precache.
  * - `demo-poster.png` — flat artwork. Large areas of solid colour and hard
  *   edges, i.e. the case where PNG/lossless wins and JPEG rings.
  * - `demo-vector.svg` — the vector case. Hand-authored in `public/demo/`
  *   instead of painted here, and deliberately free of live text: an SVG
  *   rendered through `<img>` cannot reach the page's `@font-face`, so any type
  *   inside it would fall back to a system font and read off-brand.
+ * - `demo-hdr.avif` — the HDR case, and the only sample this file cannot paint
+ *   on its own. Built by the separate `hdr` target below, which reuses this
+ *   exact composition and gives it real highlight headroom. See `buildHdr`.
  *
  * The dominant accent of each piece matches the accent its card uses in
  * `HomeView.svelte` — blue, red, green in order.
@@ -460,7 +546,8 @@ async function buildOg(browser, fonts) {
 
 /**
  * Paint the gradient sample and hand back a `data:` URL in the requested
- * format.
+ * format, or — for `type: 'raw'` — base64 of the raw RGBA bytes, which is how
+ * `buildHdr` gets the pixels out of the browser without a PNG decoder in here.
  *
  * The screenshot step re-paints it losslessly (`image/png`) to stand in for
  * the everyday "I exported a photo as PNG" case — recompressing the shipped
@@ -468,7 +555,7 @@ async function buildOg(browser, fonts) {
  */
 async function paintGradient(page, { width, height, type, quality }) {
   return page.evaluate(
-    async ([w, h, mime, q, c, P, faces]) => {
+    async ([w, h, mime, q, c, G, P, faces]) => {
       await Promise.all(faces.map((face) => document.fonts.load(face)));
 
       const canvas = document.createElement('canvas');
@@ -476,8 +563,7 @@ async function paintGradient(page, { width, height, type, quality }) {
       canvas.height = h;
       const ctx = canvas.getContext('2d');
 
-      const inset = Math.round(w * P.inset);
-      const frame = Math.round(w * P.frame);
+      const { inset, frame } = G;
       const stroke = (width) => {
         ctx.strokeStyle = c.ink;
         ctx.lineWidth = width;
@@ -486,45 +572,61 @@ async function paintGradient(page, { width, height, type, quality }) {
       ctx.fillStyle = c.paper;
       ctx.fillRect(0, 0, w, h);
 
-      // The continuous-tone payload. Everything else on the sheet is flat, so
-      // this field is what the quality slider actually trades against; it is
-      // sized to about half the canvas for that reason. Its right and bottom
-      // edges land on the frame's centreline, which paints over them last.
-      const fx = Math.round(w * 0.4);
-      const fy = Math.round(h * 0.12);
-      const fw = w - inset - fx;
-      const fh = h - inset - fy;
+      // The continuous-tone payload, cut into a mountain range. Everything
+      // else on the sheet is flat, so this field is what the quality slider
+      // actually trades against; the box is about 54% of the sheet and the
+      // ridge keeps roughly 70% of it, so a bit over a third of the image is
+      // graded, grained pixels. Its right and bottom edges land on the frame's
+      // centreline, which paints over them last.
+      const { fx, fy, fw, fh, ridge: RIDGE } = G;
+      const ridgeX = (t) => fx + t * fw;
+      const ridgeY = (t) => fy + t * fh;
+      /** Trace the range: along the ridge, down to the frame, back along it. */
+      const tracePeaks = () => {
+        ctx.beginPath();
+        ctx.moveTo(ridgeX(RIDGE[0][0]), ridgeY(RIDGE[0][1]));
+        for (const [x, y] of RIDGE.slice(1)) ctx.lineTo(ridgeX(x), ridgeY(y));
+        ctx.lineTo(fx + fw, fy + fh);
+        ctx.lineTo(fx, fy + fh);
+        ctx.closePath();
+      };
 
-      const field = ctx.createLinearGradient(fx, fy, fx + fw, fy + fh);
+      // Paint the graded, grained field on its own canvas first, then stamp it
+      // through the ridge as a clipping path. Doing the grain in place on the
+      // main canvas is not an option: `putImageData` writes straight to the
+      // bitmap and ignores the clipping path entirely, so the noise would land
+      // on the paper around the peaks — and the paper has to stay flat, which
+      // is the whole reason the grain is confined to the field.
+      const off = document.createElement('canvas');
+      off.width = fw;
+      off.height = fh;
+      const octx = off.getContext('2d');
+
+      const field = octx.createLinearGradient(0, 0, fw, fh);
       field.addColorStop(0, c.blue);
       field.addColorStop(0.52, c.purple);
       field.addColorStop(1, c.red);
-      ctx.fillStyle = field;
-      ctx.fillRect(fx, fy, fw, fh);
+      octx.fillStyle = field;
+      octx.fillRect(0, 0, fw, fh);
 
       // A wide cream glow inside the field: more smooth tonal variation for a
       // codec to smear, at no cost in flat area.
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(fx, fy, fw, fh);
-      ctx.clip();
-      const glow = ctx.createRadialGradient(fx, h * 0.42, 0, fx, h * 0.42, h * 0.62);
+      const glow = octx.createRadialGradient(0, fh * 0.4, 0, 0, fh * 0.4, fh * 0.74);
       glow.addColorStop(0, 'rgba(244,238,224,0.6)');
       glow.addColorStop(0.55, 'rgba(244,238,224,0.13)');
       glow.addColorStop(1, 'rgba(244,238,224,0)');
-      ctx.fillStyle = glow;
-      ctx.fillRect(fx, fy, fw, fh);
-      ctx.restore();
+      octx.fillStyle = glow;
+      octx.fillRect(0, 0, fw, fh);
 
-      // Film grain, clipped to the field so the paper stays flat and cheap.
-      // Kept light (±5 levels at most) and luminance-weighted so the darkest
-      // corner stays cleaner: heavier grain is high-frequency noise that every
-      // lossy codec discards, which drags SSIM down for a reason that says
-      // nothing about the codec.
+      // Film grain. Kept light (±5 levels at most) and luminance-weighted so
+      // the darkest corner stays cleaner: heavier grain is high-frequency
+      // noise that every lossy codec discards, which drags SSIM down for a
+      // reason that says nothing about the codec.
       //
       // Seeded (mulberry32), not `Math.random`: the output is committed, so
       // re-running this script must produce the same bytes rather than a diff
-      // every time.
+      // every time. The whole box is grained, including the part the ridge
+      // clips away, so the seed walks the same pixels whatever the silhouette.
       let seed = 0x9e3779b9;
       const random = () => {
         seed = (seed + 0x6d2b79f5) | 0;
@@ -532,7 +634,7 @@ async function paintGradient(page, { width, height, type, quality }) {
         t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
         return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
       };
-      const region = ctx.getImageData(fx, fy, fw, fh);
+      const region = octx.getImageData(0, 0, fw, fh);
       const px = region.data;
       for (let i = 0; i < px.length; i += 4) {
         const luma = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) / 255;
@@ -541,22 +643,28 @@ async function paintGradient(page, { width, height, type, quality }) {
         px[i + 1] = Math.max(0, Math.min(255, px[i + 1] + noise));
         px[i + 2] = Math.max(0, Math.min(255, px[i + 2] + noise));
       }
-      ctx.putImageData(region, fx, fy);
+      octx.putImageData(region, 0, 0);
 
-      // Ink on the two field edges that meet paper; the frame covers the rest.
+      ctx.save();
+      tracePeaks();
+      ctx.clip();
+      ctx.drawImage(off, fx, fy);
+      ctx.restore();
+
+      // Ink on the ridge and the left drop — the two edges that meet paper.
+      // The frame covers the bottom and right, so they are left unstroked.
       stroke(frame);
       ctx.beginPath();
-      ctx.moveTo(fx, h - inset);
-      ctx.lineTo(fx, fy);
-      ctx.lineTo(w - inset, fy);
+      ctx.moveTo(fx, fy + fh);
+      for (const [x, y] of RIDGE) ctx.lineTo(ridgeX(x), ridgeY(y));
       ctx.stroke();
 
-      // A flat cream disc straddling the field's left edge: one crisp boundary
-      // running straight through a smooth gradient, which is where a lossy
-      // codec shows its ringing first. Painted after the grain so the disc
-      // itself stays clean.
+      // A flat cream disc straddling the ridge: one crisp boundary running
+      // straight through a smooth gradient, which is where a lossy codec shows
+      // its ringing first. Painted after the grain so the disc itself stays
+      // clean, and after the range so it reads over both slopes.
       ctx.beginPath();
-      ctx.arc(fx, h * 0.42, Math.round(h * 0.155), 0, Math.PI * 2);
+      ctx.arc(G.moon.x, G.moon.y, G.moon.r, 0, Math.PI * 2);
       ctx.fillStyle = c.cream;
       ctx.fill();
       ctx.stroke();
@@ -564,8 +672,8 @@ async function paintGradient(page, { width, height, type, quality }) {
       // Yellow quarter-disc in the top-left corner, echoing the blue one on
       // the flat poster.
       ctx.beginPath();
-      ctx.moveTo(inset, inset);
-      ctx.arc(inset, inset, Math.round(h * 0.28), 0, Math.PI / 2);
+      ctx.moveTo(G.sun.x, G.sun.y);
+      ctx.arc(G.sun.x, G.sun.y, G.sun.r, 0, Math.PI / 2);
       ctx.closePath();
       ctx.fillStyle = c.yellow;
       ctx.fill();
@@ -593,7 +701,17 @@ async function paintGradient(page, { width, height, type, quality }) {
       stroke(frame);
       ctx.strokeRect(inset, inset, w - inset * 2, h - inset * 2);
 
-      return canvas.toDataURL(mime, q);
+      if (mime !== 'raw') return canvas.toDataURL(mime, q);
+
+      // Raw RGBA, base64'd in chunks: `String.fromCharCode(...bytes)` on a
+      // 7.7 MB buffer overflows the argument stack.
+      const bytes = ctx.getImageData(0, 0, w, h).data;
+      let ascii = '';
+      const CHUNK = 0x8000;
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        ascii += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+      }
+      return btoa(ascii);
     },
     [
       width,
@@ -601,6 +719,7 @@ async function paintGradient(page, { width, height, type, quality }) {
       type,
       quality,
       { ink: INK, paper: PAPER, cream: CREAM, blue: BLUE, purple: PURPLE, red: RED, yellow: YELLOW },
+      gradientGeometry(width, height, POSTER),
       POSTER,
       POSTER_FACES,
     ],
@@ -728,10 +847,10 @@ async function buildDemos(browser, fonts) {
       quality: 0.86,
     });
     const gradientFile = p('public/demo/demo-gradient.jpg');
-    // Budgets sit just above what the current art measures (138 KB / 57 KB):
+    // Budgets sit just above what the current art measures (131 KB / 57 KB):
     // these files ship in the service worker's precache, so a composition that
     // suddenly doubles in size should fail the run rather than land quietly.
-    record(gradientFile, await writeDataUrl(gradientFile, gradient), [1600, 1200, 170 * 1024]);
+    record(gradientFile, await writeDataUrl(gradientFile, gradient), [1600, 1200, 150 * 1024]);
 
     const poster = await paintPoster(page, { width: 1200, height: 900 });
     const posterFile = p('public/demo/demo-poster.png');
@@ -742,7 +861,221 @@ async function buildDemos(browser, fonts) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* 4. Documentation screenshots                                                */
+/* 4. HDR demo raster                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `demo-hdr.avif` — the fourth sample, and the only one the app cannot make
+ * itself: a genuine 10-bit PQ (SMPTE ST 2084) AVIF, so the HDR badge in the
+ * editor has something honest to fire on.
+ *
+ * Why it is built like this. A `<canvas>` is 8-bit sRGB and `toDataURL` emits
+ * SDR: there is no browser path to PQ, HLG or a gain map. Handing avifenc the
+ * SDR pixels with `--cicp 9/16/9` would produce a file that *claims* PQ while
+ * carrying no highlight information at all — Pinch would badge it `HDR (PQ)`
+ * and every HDR-aware viewer would render it wrong. So the transfer function
+ * is applied to real values here instead:
+ *
+ *   sRGB 8-bit → linear → absolute nits → BT.2020 → ST 2084 → 10-bit Y'CbCr
+ *
+ * Diffuse surfaces sit at `HDR_REFERENCE_NITS`; the two light sources in the
+ * composition — the yellow quarter-disc and the cream disc on the ridge — are
+ * treated as emissive and pushed up to `HDR_PEAK_NITS`. That headroom is what
+ * makes the file HDR rather than an SDR image in an HDR container.
+ *
+ * Opt-in, like `macos`: it shells out to `avifenc` (libavif), which is not an
+ * npm dependency, so a bare run must not fail for want of it.
+ */
+
+/**
+ * Where diffuse white sits. BT.2408 says 203 nits for HDR reference white and
+ * this is deliberately not that, for a reason worth writing down.
+ *
+ * Almost everyone who opens this sample is on an SDR display, so what they
+ * actually see is the browser's tone-map of it — and Chrome's maps roughly 434
+ * nits onto display white. At 203 the sheet came back as 182,181,168 against
+ * the artwork's 251,247,235: a grey wash that reads as a broken decode, not as
+ * a demo. Sweeping the value and measuring the decoded result against the SDR
+ * JPEG at four probe points (paper, sun, moon, mountain body) puts the minimum
+ * here, at a mean per-channel error of 14/255; 300 gives 26, 400 gives 17, and
+ * past 500 the paper keeps improving while the mountain overshoots.
+ *
+ * The file is still honestly PQ — real ST 2084 values, a real 2× highlight
+ * headroom over diffuse white. It is graded for the tone-mapper it will meet
+ * rather than for a mastering suite.
+ */
+const HDR_REFERENCE_NITS = 500;
+/** Peak of the emissive shapes: 2× diffuse white, i.e. real headroom. */
+const HDR_PEAK_NITS = 1000;
+
+const srgbToLinear = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+
+/** Linear BT.709 → linear BT.2020 (ITU-R BT.2087). */
+function bt709ToBt2020(r, g, b) {
+  return [
+    0.6274039 * r + 0.329283 * g + 0.0433131 * b,
+    0.0690797 * r + 0.9195404 * g + 0.0113799 * b,
+    0.0163914 * r + 0.0880132 * g + 0.8955953 * b,
+  ];
+}
+
+/** ST 2084 inverse EOTF: absolute nits → PQ code value in 0..1. */
+function pqFromNits(nits) {
+  const m1 = 2610 / 16384;
+  const m2 = (2523 / 4096) * 128;
+  const c1 = 3424 / 4096;
+  const c2 = (2413 / 4096) * 32;
+  const c3 = (2392 / 4096) * 32;
+  const y = Math.max(0, Math.min(1, nits / 10000)) ** m1;
+  return ((c1 + c2 * y) / (1 + c3 * y)) ** m2;
+}
+
+/**
+ * How much brighter than reference white a pixel is, from the composition's
+ * own geometry rather than from its luminance. Luminance is the wrong signal
+ * here: the paper is the brightest thing on the sheet, and blowing a whole
+ * cream background to 800 nits would be an eye-watering file, not an HDR one.
+ *
+ * Both shapes ramp down to 1 at their rim so the highlight has a shoulder
+ * instead of a hard step, which is also kinder to the encoder.
+ */
+function emissiveGain(x, y, { sun, moon }) {
+  const peak = HDR_PEAK_NITS / HDR_REFERENCE_NITS;
+  const sunD = Math.hypot(x - sun.x, y - sun.y) / sun.r;
+  if (sunD <= 1) return 1 + (peak - 1) * (1 - sunD ** 2);
+  // The moon is cream, not white: half the sun's headroom reads as moonlight
+  // rather than a second sun.
+  const moonD = Math.hypot(x - moon.x, y - moon.y) / moon.r;
+  if (moonD <= 1) return 1 + (peak / 2 - 1) * (1 - moonD ** 2);
+  return 1;
+}
+
+/** Wrap three 10-bit planes as a full-range 4:4:4 y4m, which avifenc reads. */
+function y4m444p10(width, height, luma, cb, cr) {
+  const plane = (samples) => {
+    const out = Buffer.alloc(samples.length * 2);
+    for (let i = 0; i < samples.length; i += 1) out.writeUInt16LE(samples[i], i * 2);
+    return out;
+  };
+  return Buffer.concat([
+    Buffer.from(
+      `YUV4MPEG2 W${width} H${height} F25:1 Ip A1:1 C444p10 XCOLORRANGE=FULL\nFRAME\n`,
+      'latin1',
+    ),
+    plane(luma),
+    plane(cb),
+    plane(cr),
+  ]);
+}
+
+async function buildHdr(browser, fonts) {
+  console.log('hdr');
+  try {
+    execFileSync('avifenc', ['--version'], { stdio: 'ignore' });
+  } catch {
+    throw new Error(
+      'The `hdr` target needs avifenc (libavif) on PATH — `brew install libavif`.\n' +
+        'Every other target runs without it; skip this one to rebuild the rest.',
+    );
+  }
+
+  const width = 1600;
+  const height = 1200;
+  const geometry = gradientGeometry(width, height, POSTER);
+
+  const page = await loadPage(browser, {
+    width: 64,
+    height: 64,
+    html: `<style>${fonts}</style><body></body>`,
+  });
+  let rgba;
+  try {
+    // Same painter, same composition, same seeded grain as the JPEG sample —
+    // this is that picture with headroom, not a different one.
+    rgba = Buffer.from(await paintGradient(page, { width, height, type: 'raw' }), 'base64');
+  } finally {
+    await page.close();
+  }
+  if (rgba.length !== width * height * 4) {
+    throw new Error(`hdr: expected ${width * height * 4} raw bytes, got ${rgba.length}`);
+  }
+
+  const count = width * height;
+  const luma = new Uint16Array(count);
+  const cb = new Uint16Array(count);
+  const cr = new Uint16Array(count);
+  const clamp10 = (v) => Math.max(0, Math.min(1023, Math.round(v)));
+  let peak = 0;
+
+  for (let i = 0; i < count; i += 1) {
+    const gain = emissiveGain(i % width, Math.floor(i / width), geometry);
+    const [r2020, g2020, b2020] = bt709ToBt2020(
+      srgbToLinear(rgba[i * 4] / 255) * gain,
+      srgbToLinear(rgba[i * 4 + 1] / 255) * gain,
+      srgbToLinear(rgba[i * 4 + 2] / 255) * gain,
+    );
+    peak = Math.max(
+      peak,
+      r2020 * HDR_REFERENCE_NITS,
+      g2020 * HDR_REFERENCE_NITS,
+      b2020 * HDR_REFERENCE_NITS,
+    );
+
+    const rp = pqFromNits(r2020 * HDR_REFERENCE_NITS);
+    const gp = pqFromNits(g2020 * HDR_REFERENCE_NITS);
+    const bp = pqFromNits(b2020 * HDR_REFERENCE_NITS);
+
+    // BT.2020 non-constant luminance (CICP matrix 9), full range.
+    const y = 0.2627 * rp + 0.678 * gp + 0.0593 * bp;
+    luma[i] = clamp10(y * 1023);
+    cb[i] = clamp10(((bp - y) / 1.8814) * 1023 + 512);
+    cr[i] = clamp10(((rp - y) / 1.4746) * 1023 + 512);
+  }
+
+  const scratch = path.join(os.tmpdir(), `pinch-hdr-${process.pid}.y4m`);
+  const file = p('public/demo/demo-hdr.avif');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(scratch, y4m444p10(width, height, luma, cb, cr));
+  try {
+    execFileSync(
+      'avifenc',
+      [
+        // Primaries 9 (BT.2020), transfer 16 (PQ), matrix 9 (BT.2020 NCL) —
+        // the transfer is the byte `detectHdr` reads.
+        ...['--cicp', '9/16/9'],
+        ...['--depth', '10', '--yuv', '444', '--range', 'full'],
+        // q90. This is a sample to re-compress, so the grain has to survive
+        // the trip in: measured as the sigma of a high-pass over a flat patch
+        // of the mountain body, the source grain is 4.58 (10-bit levels) and
+        // decodes back at 3.71 here. q82 collapses it to 0.37 — a tone sample
+        // with no tone left — and q95 only recovers 4.29 for another 108 KB,
+        // which these files, sitting in the SW precache, do not get to spend.
+        ...['--qcolor', '90', '--qalpha', '90', '--speed', '4'],
+        '--ignore-exif',
+        '--ignore-xmp',
+        scratch,
+        file,
+      ],
+      { stdio: 'ignore' },
+    );
+  } finally {
+    await fs.rm(scratch, { force: true });
+  }
+
+  const bytes = await fs.readFile(file);
+  const transfer = colrTransfer(bytes);
+  if (transfer !== 16) {
+    throw new Error(
+      `${path.relative(ROOT, file)}: colr/nclx transfer is ${transfer ?? 'absent'}, expected 16 (PQ).\n` +
+        'Without it `detectHdr` in src/lib/codecs/hdr.ts sees an ordinary AVIF and the badge never fires.',
+    );
+  }
+  record(file, bytes, [width, height, 90 * 1024]);
+  console.log(`  ${''.padEnd(34)} PQ, 10-bit, peak ${peak.toFixed(0)} nits`);
+}
+
+/* -------------------------------------------------------------------------- */
+/* 5. Documentation screenshots                                                */
 /* -------------------------------------------------------------------------- */
 
 async function findFreePort(start = 4590, tries = 80) {
@@ -798,8 +1131,15 @@ async function buildScreenshots(browser) {
 
     const home = p('docs/media/home.png');
     await fs.mkdir(path.dirname(home), { recursive: true });
+    // Taller than the editor shot on purpose: the sample grid is 2×2 since the
+    // HDR sample joined it, and at 900px the second row is cut in half. A
+    // screenshot of the home screen that crops the samples section is worse
+    // than one that is not exactly viewport-shaped.
+    await page.setViewportSize({ width: 1440, height: 1010 });
+    await page.waitForTimeout(400);
     await page.screenshot({ path: home });
-    record(home, await fs.readFile(home), [1440, 900]);
+    record(home, await fs.readFile(home), [1440, 1010]);
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     // Feed the real pipeline a lossless PNG of the gradient sample — an
     // ordinary photo export, i.e. what someone actually drops on the app.
@@ -854,11 +1194,14 @@ async function buildScreenshots(browser) {
 /* Entry point                                                                 */
 /* -------------------------------------------------------------------------- */
 
-const ALL = ['icons', 'macos', 'og', 'demo', 'shots'];
-// `macos` shells out to `iconutil` (macOS-only) and is opt-in: a bare,
-// argument-less run must keep working for contributors on any platform, so
-// it stays out of the implied "everything" set and has to be named explicitly.
-const DEFAULT = ALL.filter((target) => target !== 'macos');
+const ALL = ['icons', 'macos', 'og', 'demo', 'hdr', 'shots'];
+// `macos` shells out to `iconutil` (macOS-only) and `hdr` to `avifenc`
+// (libavif, not an npm dependency). Both are opt-in: a bare, argument-less run
+// must keep working for contributors on any platform with nothing but
+// `npm install`, so they stay out of the implied "everything" set and have to
+// be named explicitly.
+const OPT_IN = ['macos', 'hdr'];
+const DEFAULT = ALL.filter((target) => !OPT_IN.includes(target));
 const requested = process.argv.slice(2).filter((arg) => !arg.startsWith('-'));
 const targets = requested.length ? requested : DEFAULT;
 const unknown = targets.filter((target) => !ALL.includes(target));
@@ -874,6 +1217,7 @@ try {
   if (targets.includes('macos')) await buildMacosIcons(browser);
   if (targets.includes('og')) await buildOg(browser, fonts);
   if (targets.includes('demo')) await buildDemos(browser, fonts);
+  if (targets.includes('hdr')) await buildHdr(browser, fonts);
   if (targets.includes('shots')) await buildScreenshots(browser);
 } finally {
   await browser.close();
