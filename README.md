@@ -17,7 +17,7 @@
   <img src="./docs/media/editor.png" alt="The Pinch editor: the original and an AVIF encode under one draggable reveal divider, with size, savings and SSIM readouts" width="900">
 </p>
 
-<p align="center"><strong>Try it: PINCH_URL</strong></p>
+<p align="center"><strong>Try it: https://pinch.rama.app</strong></p>
 
 Pinch is a spiritual successor to [Squoosh](https://github.com/GoogleChromeLabs/squoosh),
 which is no longer maintained. Same idea — codecs compiled to WebAssembly, running in

@@ -110,7 +110,7 @@ third-party embed.
 Check the headers are actually on the wire:
 
 ```sh
-curl -I https://PINCH_URL | grep -i cross-origin
+curl -I https://pinch.rama.app | grep -i cross-origin
 ```
 
 Expected:
@@ -124,8 +124,8 @@ Check a hashed asset too, since that is the path a misconfigured host is most li
 wrong — pull a real filename out of the deployed HTML rather than guessing a hash:
 
 ```sh
-ASSET=$(curl -s https://PINCH_URL/ | grep -o '/assets/[^"]*\.js' | head -1)
-curl -I "https://PINCH_URL$ASSET" | grep -i 'cross-origin\|cache-control'
+ASSET=$(curl -s https://pinch.rama.app/ | grep -o '/assets/[^"]*\.js' | head -1)
+curl -I "https://pinch.rama.app$ASSET" | grep -i 'cross-origin\|cache-control'
 # expect both isolation headers plus:
 # cache-control: public, max-age=31536000, immutable
 ```
@@ -133,8 +133,8 @@ curl -I "https://PINCH_URL$ASSET" | grep -i 'cross-origin\|cache-control'
 Check the two files that must *not* be cached immutably:
 
 ```sh
-curl -I https://PINCH_URL/sw.js | grep -i cache-control
-curl -I https://PINCH_URL/manifest.webmanifest | grep -i cache-control
+curl -I https://pinch.rama.app/sw.js | grep -i cache-control
+curl -I https://pinch.rama.app/manifest.webmanifest | grep -i cache-control
 # both: cache-control: public, max-age=0, must-revalidate
 ```
 
