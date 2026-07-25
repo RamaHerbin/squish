@@ -665,7 +665,7 @@
     background: none;
     border: 0;
     padding: 0;
-    font-family: var(--font-mono);
+    font-family: var(--font-body);
     font-size: var(--fs-mono-md);
     letter-spacing: var(--tracking-mono-wide);
     text-transform: uppercase;
