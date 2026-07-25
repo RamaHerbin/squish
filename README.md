@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="./docs/media/editor.png" alt="The Pinch editor: the original and an AVIF encode under one draggable reveal divider, with size, savings and SSIM readouts" width="900">
+  <img src="./docs/media/editor.png" alt="The Pinch editor: the original and a MozJPEG encode under one draggable reveal divider, with size, savings and SSIM readouts" width="900">
 </p>
 
 <p align="center"><strong>Try it: https://pinch.rama.app</strong></p>

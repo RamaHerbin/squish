@@ -44,19 +44,22 @@
   }
 
   /**
-   * Bundled sample images (`public/demo/`), generated deterministically by
-   * `scripts/generate-assets.mjs` — synthetic, so no third-party rights ride
-   * along. Sizes are fetched at runtime, never hard-coded.
+   * Bundled sample images (`public/demo/`) — synthetic, so no third-party
+   * rights ride along, and one editorial series so the row reads as a set.
+   * Each covers a different case for the codecs: continuous tone, flat
+   * artwork, vector. The two rasters are painted deterministically by
+   * `scripts/generate-assets.mjs`; the SVG is hand-authored source. Sizes are
+   * fetched at runtime, never hard-coded.
    */
   const DEMO_SAMPLES: readonly DemoSample[] = [
     {
-      id: 'sunset',
-      url: '/demo/demo-sunset.jpg',
-      name: 'demo-sunset.jpg',
-      label: 'Sunset gradient photo',
+      id: 'gradient',
+      url: '/demo/demo-gradient.jpg',
+      name: 'demo-gradient.jpg',
+      label: 'Duotone gradient poster',
       width: 1600,
       height: 1200,
-      initial: 'S',
+      initial: 'G',
       accent: 'blue',
       format: 'JPEG',
     },
@@ -72,13 +75,13 @@
       format: 'PNG',
     },
     {
-      id: 'orbit',
-      url: '/demo/demo-orbit.svg',
-      name: 'demo-orbit.svg',
-      label: 'Abstract orbit',
+      id: 'vector',
+      url: '/demo/demo-vector.svg',
+      name: 'demo-vector.svg',
+      label: 'Flat vector shapes',
       width: 640,
       height: 480,
-      initial: 'O',
+      initial: 'V',
       accent: 'green',
       format: 'SVG',
     },

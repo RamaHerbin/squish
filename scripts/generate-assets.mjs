@@ -36,7 +36,7 @@
  *   src-tauri/icons/128x128.png        128×128   from icon.svg
  *   src-tauri/icons/128x128@2x.png     256×256   from icon.svg
  *   public/og.png                      1200×630  social card
- *   public/demo/demo-sunset.jpg        1600×1200 synthetic photo, JPEG q0.8
+ *   public/demo/demo-gradient.jpg      1600×1200 duotone gradient, JPEG q0.86
  *   public/demo/demo-poster.png        1200×900  geometric poster, PNG
  *   docs/media/home.png                1440×900  app screenshot
  *   docs/media/editor.png              1440×900  app screenshot
@@ -68,6 +68,32 @@ const PURPLE = '#8E55E9';
 
 /** Encoder labels, mirrored from `ENCODER_REGISTRY` in src/lib/codecs/registry.ts. */
 const WASM_ENCODER_LABELS = ['AVIF', 'JPEG XL', 'WEBP', 'MOZJPEG', 'OXIPNG', 'QOI'];
+
+/**
+ * The chassis the three bundled samples share, in fractions of the canvas so
+ * one set of numbers covers every size: paper ground, ink frame, flat accent
+ * shapes outlined in ink, a block of hairlines, an Archivo display word and a
+ * Space Mono caption. `public/demo/demo-vector.svg` is hand-authored
+ * against the same fractions on its own 640×480 box — keep the two in step.
+ *
+ * `inset` and `frame` are fractions of the width; the rest of the height.
+ */
+const POSTER = {
+  inset: 0.0283,
+  frame: 0.005,
+  hairline: 0.0017,
+  display: 0.085,
+  caption: 0.024,
+};
+
+/**
+ * A canvas draw silently falls back to a system font unless the face is
+ * actually loaded: declaring `@font-face` is not enough, and
+ * `document.fonts.ready` has nothing to wait for on a page whose DOM never
+ * uses the family. Every canvas painter therefore asks for its faces by hand
+ * before the first `fillText`.
+ */
+const POSTER_FACES = ["700 100px 'Archivo'", "400 100px 'Space Mono'"];
 
 /* -------------------------------------------------------------------------- */
 /* Plumbing                                                                    */
@@ -405,258 +431,311 @@ async function buildOg(browser, fonts) {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Two synthetic images to compress, painted with `<canvas>` so the repo owns
- * every byte (no stock photo, no licence question, no download):
+ * Three synthetic samples to compress, painted as one editorial series on the
+ * shared `POSTER` chassis so the home screen reads as a set rather than three
+ * unrelated pictures. Painting them here means the repo owns every byte: no
+ * stock photo, no licence question, no download.
  *
- * - `demo-sunset.jpg`  — layered sky gradient, sun, haze-separated ridges and
- *   film grain. Grain is what makes it behave like a photograph under a
- *   codec: it is expensive to store and cheap to lose, so the quality slider
- *   has something real to trade against.
- * - `demo-poster.png`  — flat geometric artwork on paper. Large areas of
- *   solid colour and hard edges, i.e. the case where PNG/lossless wins and
- *   JPEG rings.
+ * Each one still covers a different case for the codecs to work on:
+ *
+ * - `demo-gradient.jpg` — continuous tone. A duotone field, roughly half the
+ *   sheet, carrying a diagonal gradient and seeded film grain. Grain is what
+ *   makes a file behave like a photograph under a codec — expensive to store,
+ *   cheap to lose — so the quality slider has something real to trade against.
+ *   Shipped at q0.86, up from the q0.80 the old sunset used: the sheet now has
+ *   ink edges on cream, and a demo should not be one codec fighting another
+ *   codec's artefacts. Checked against q0.82 and q0.90 by eye at 5× on the
+ *   disc outline and the hairline block — q0.90 bought no visible improvement
+ *   for its extra 36 KB, and these files sit in the SW precache.
+ * - `demo-poster.png` — flat artwork. Large areas of solid colour and hard
+ *   edges, i.e. the case where PNG/lossless wins and JPEG rings.
+ * - `demo-vector.svg` — the vector case. Hand-authored in `public/demo/`
+ *   instead of painted here, and deliberately free of live text: an SVG
+ *   rendered through `<img>` cannot reach the page's `@font-face`, so any type
+ *   inside it would fall back to a system font and read off-brand.
+ *
+ * The dominant accent of each piece matches the accent its card uses in
+ * `HomeView.svelte` — blue, red, green in order.
  */
+
 /**
- * Paint the sunset and hand back a `data:` URL in the requested format.
+ * Paint the gradient sample and hand back a `data:` URL in the requested
+ * format.
  *
  * The screenshot step re-paints it losslessly (`image/png`) to stand in for
  * the everyday "I exported a photo as PNG" case — recompressing the shipped
  * JPEG instead would demo a codec fighting another codec's artefacts.
  */
-async function paintSunset(page, { width, height, type, quality }) {
+async function paintGradient(page, { width, height, type, quality }) {
   return page.evaluate(
-    ([w, h, mime, q, palette]) => {
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
+    async ([w, h, mime, q, c, P, faces]) => {
+      await Promise.all(faces.map((face) => document.fonts.load(face)));
 
-        const sky = ctx.createLinearGradient(0, 0, 0, h);
-        sky.addColorStop(0, '#140b2c');
-        sky.addColorStop(0.28, '#3d1550');
-        sky.addColorStop(0.5, '#8f2f5e');
-        sky.addColorStop(0.68, '#e0603a');
-        sky.addColorStop(0.82, '#f79c3d');
-        sky.addColorStop(1, '#ffd98a');
-        ctx.fillStyle = sky;
-        ctx.fillRect(0, 0, w, h);
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
 
-        // Sun: a hard disc inside a wide glow, sitting on the horizon line.
-        const sunX = w * 0.62;
-        const sunY = h * 0.6;
-        const glow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, h * 0.42);
-        glow.addColorStop(0, 'rgba(255,246,214,0.95)');
-        glow.addColorStop(0.35, 'rgba(255,209,102,0.45)');
-        glow.addColorStop(1, 'rgba(255,209,102,0)');
-        ctx.fillStyle = glow;
-        ctx.fillRect(0, 0, w, h);
+      const inset = Math.round(w * P.inset);
+      const frame = Math.round(w * P.frame);
+      const stroke = (width) => {
+        ctx.strokeStyle = c.ink;
+        ctx.lineWidth = width;
+      };
+
+      ctx.fillStyle = c.paper;
+      ctx.fillRect(0, 0, w, h);
+
+      // The continuous-tone payload. Everything else on the sheet is flat, so
+      // this field is what the quality slider actually trades against; it is
+      // sized to about half the canvas for that reason. Its right and bottom
+      // edges land on the frame's centreline, which paints over them last.
+      const fx = Math.round(w * 0.4);
+      const fy = Math.round(h * 0.12);
+      const fw = w - inset - fx;
+      const fh = h - inset - fy;
+
+      const field = ctx.createLinearGradient(fx, fy, fx + fw, fy + fh);
+      field.addColorStop(0, c.blue);
+      field.addColorStop(0.52, c.purple);
+      field.addColorStop(1, c.red);
+      ctx.fillStyle = field;
+      ctx.fillRect(fx, fy, fw, fh);
+
+      // A wide cream glow inside the field: more smooth tonal variation for a
+      // codec to smear, at no cost in flat area.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(fx, fy, fw, fh);
+      ctx.clip();
+      const glow = ctx.createRadialGradient(fx, h * 0.42, 0, fx, h * 0.42, h * 0.62);
+      glow.addColorStop(0, 'rgba(244,238,224,0.6)');
+      glow.addColorStop(0.55, 'rgba(244,238,224,0.13)');
+      glow.addColorStop(1, 'rgba(244,238,224,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(fx, fy, fw, fh);
+      ctx.restore();
+
+      // Film grain, clipped to the field so the paper stays flat and cheap.
+      // Kept light (±5 levels at most) and luminance-weighted so the darkest
+      // corner stays cleaner: heavier grain is high-frequency noise that every
+      // lossy codec discards, which drags SSIM down for a reason that says
+      // nothing about the codec.
+      //
+      // Seeded (mulberry32), not `Math.random`: the output is committed, so
+      // re-running this script must produce the same bytes rather than a diff
+      // every time.
+      let seed = 0x9e3779b9;
+      const random = () => {
+        seed = (seed + 0x6d2b79f5) | 0;
+        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+      const region = ctx.getImageData(fx, fy, fw, fh);
+      const px = region.data;
+      for (let i = 0; i < px.length; i += 4) {
+        const luma = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) / 255;
+        const noise = (random() - 0.5) * 10 * (0.35 + luma * 0.9);
+        px[i] = Math.max(0, Math.min(255, px[i] + noise));
+        px[i + 1] = Math.max(0, Math.min(255, px[i + 1] + noise));
+        px[i + 2] = Math.max(0, Math.min(255, px[i + 2] + noise));
+      }
+      ctx.putImageData(region, fx, fy);
+
+      // Ink on the two field edges that meet paper; the frame covers the rest.
+      stroke(frame);
+      ctx.beginPath();
+      ctx.moveTo(fx, h - inset);
+      ctx.lineTo(fx, fy);
+      ctx.lineTo(w - inset, fy);
+      ctx.stroke();
+
+      // A flat cream disc straddling the field's left edge: one crisp boundary
+      // running straight through a smooth gradient, which is where a lossy
+      // codec shows its ringing first. Painted after the grain so the disc
+      // itself stays clean.
+      ctx.beginPath();
+      ctx.arc(fx, h * 0.42, Math.round(h * 0.155), 0, Math.PI * 2);
+      ctx.fillStyle = c.cream;
+      ctx.fill();
+      ctx.stroke();
+
+      // Yellow quarter-disc in the top-left corner, echoing the blue one on
+      // the flat poster.
+      ctx.beginPath();
+      ctx.moveTo(inset, inset);
+      ctx.arc(inset, inset, Math.round(h * 0.28), 0, Math.PI / 2);
+      ctx.closePath();
+      ctx.fillStyle = c.yellow;
+      ctx.fill();
+      ctx.stroke();
+
+      // Hairline rules — the fine detail a lossy codec smears first.
+      const textX = inset + Math.round(w * 0.03);
+      stroke(Math.max(1, Math.round(w * P.hairline)));
+      for (let i = 0; i < 10; i += 1) {
+        const y = h * 0.6 + i * h * 0.011;
         ctx.beginPath();
-        ctx.arc(sunX, sunY, h * 0.105, 0, Math.PI * 2);
-        ctx.fillStyle = '#fff3cd';
-        ctx.fill();
+        ctx.moveTo(textX, y);
+        ctx.lineTo(w * 0.34, y);
+        ctx.stroke();
+      }
 
-        // Soft cloud streaks — blurred ellipses, not bands: a hard-edged rect
-        // would read as codec banding in the very image meant to demo codecs.
-        ctx.save();
-        ctx.filter = 'blur(26px)';
-        for (let i = 0; i < 6; i += 1) {
-          const y = h * (0.14 + i * 0.062);
-          ctx.beginPath();
-          ctx.ellipse(w * (0.2 + 0.13 * i), y, w * (0.3 - i * 0.02), h * 0.016, 0, 0, Math.PI * 2);
-          ctx.fillStyle = `rgba(255,${196 - i * 6},${168 - i * 8},${0.16 + i * 0.02})`;
-          ctx.fill();
-        }
-        ctx.restore();
+      ctx.fillStyle = c.ink;
+      ctx.font = `700 ${Math.round(h * P.display)}px 'Archivo', sans-serif`;
+      ctx.fillText('TONE', textX, h * 0.52);
+      ctx.font = `${Math.round(h * P.caption)}px 'Space Mono', monospace`;
+      ctx.fillText('PINCH · SAMPLE 01 · GRADIENT', textX, h * 0.935);
 
-        // Four ridges, each one lighter and hazier than the one in front of it.
-        // The haze is clipped to the ridge itself so the sky keeps its contrast.
-        const ridge = (baseY, amplitude, seed, top, bottom, haze) => {
-          ctx.save();
-          ctx.beginPath();
-          ctx.moveTo(0, h);
-          const steps = 96;
-          for (let i = 0; i <= steps; i += 1) {
-            const x = (w * i) / steps;
-            const t = x / w;
-            const peak =
-              baseY -
-              amplitude * Math.abs(Math.sin(t * Math.PI * 1.7 + seed)) -
-              amplitude * 0.32 * Math.sin(t * Math.PI * 5.3 + seed * 2) -
-              amplitude * 0.14 * Math.sin(t * Math.PI * 11.1 + seed * 3);
-            ctx.lineTo(x, peak);
-          }
-          ctx.lineTo(w, h);
-          ctx.closePath();
-          ctx.clip();
+      // Frame last, so shapes that run into it are cropped by the rule rather
+      // than painting over it.
+      stroke(frame);
+      ctx.strokeRect(inset, inset, w - inset * 2, h - inset * 2);
 
-          const fill = ctx.createLinearGradient(0, baseY - amplitude, 0, h);
-          fill.addColorStop(0, top);
-          fill.addColorStop(1, bottom);
-          ctx.fillStyle = fill;
-          ctx.fillRect(0, 0, w, h);
-
-          if (haze > 0) {
-            const mist = ctx.createLinearGradient(0, baseY - amplitude * 1.2, 0, baseY + amplitude);
-            mist.addColorStop(0, `rgba(255,186,146,${haze})`);
-            mist.addColorStop(1, 'rgba(255,186,146,0)');
-            ctx.fillStyle = mist;
-            ctx.fillRect(0, 0, w, h);
-          }
-          ctx.restore();
-        };
-        ridge(h * 0.68, h * 0.11, 0.4, '#8a5a86', '#6b3d70', 0.34);
-        ridge(h * 0.76, h * 0.12, 2.1, '#5b3563', '#402548', 0.2);
-        ridge(h * 0.85, h * 0.11, 3.7, '#33203c', '#22162a', 0.09);
-        ridge(h * 0.94, h * 0.08, 5.2, '#170f1f', '#0c0812', 0);
-
-        // Vignette.
-        const vignette = ctx.createRadialGradient(w / 2, h * 0.55, h * 0.2, w / 2, h * 0.55, h * 0.95);
-        vignette.addColorStop(0, 'rgba(0,0,0,0)');
-        vignette.addColorStop(1, 'rgba(0,0,0,0.42)');
-        ctx.fillStyle = vignette;
-        ctx.fillRect(0, 0, w, h);
-
-        // Film grain — per-pixel, luminance-weighted so shadows stay cleaner.
-        // Kept light (±5 levels at most): heavier grain is high-frequency noise
-        // that every lossy codec discards, which drags SSIM down for a reason
-        // that says nothing about the codec.
-        //
-        // Seeded (mulberry32), not `Math.random`: the output is committed, so
-        // re-running this script must produce the same bytes rather than a
-        // diff every time.
-        let seed = 0x9e3779b9;
-        const random = () => {
-          seed = (seed + 0x6d2b79f5) | 0;
-          let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-          t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-          return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-        };
-        const frame = ctx.getImageData(0, 0, w, h);
-        const px = frame.data;
-        for (let i = 0; i < px.length; i += 4) {
-          const luma = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) / 255;
-          const noise = (random() - 0.5) * 10 * (0.35 + luma * 0.9);
-          px[i] = Math.max(0, Math.min(255, px[i] + noise));
-          px[i + 1] = Math.max(0, Math.min(255, px[i + 1] + noise));
-          px[i + 2] = Math.max(0, Math.min(255, px[i + 2] + noise));
-        }
-        ctx.putImageData(frame, 0, 0);
-
-        // Editorial caption plate, bottom-left.
-        ctx.fillStyle = palette.ink;
-        ctx.fillRect(w * 0.045, h * 0.87, w * 0.3, h * 0.062);
-        ctx.fillStyle = palette.cream;
-        ctx.font = `${Math.round(h * 0.026)}px 'Space Mono', monospace`;
-        ctx.fillText('PINCH · SAMPLE 01', w * 0.062, h * 0.909);
-
-        return canvas.toDataURL(mime, q);
-      },
-      [width, height, type, quality, { ink: INK, cream: CREAM }],
+      return canvas.toDataURL(mime, q);
+    },
+    [
+      width,
+      height,
+      type,
+      quality,
+      { ink: INK, paper: PAPER, cream: CREAM, blue: BLUE, purple: PURPLE, red: RED, yellow: YELLOW },
+      POSTER,
+      POSTER_FACES,
+    ],
   );
 }
 
-async function buildDemos(browser) {
+/** Paint the flat poster sample and hand back a lossless PNG `data:` URL. */
+async function paintPoster(page, { width, height }) {
+  return page.evaluate(
+    async ([w, h, c, P, faces]) => {
+      await Promise.all(faces.map((face) => document.fonts.load(face)));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = c.paper;
+      ctx.fillRect(0, 0, w, h);
+
+      const stroke = (width) => {
+        ctx.strokeStyle = c.ink;
+        ctx.lineWidth = width;
+      };
+
+      const inset = Math.round(w * P.inset);
+      const frame = Math.round(w * P.frame);
+
+      // Blue quarter-disc, anchored in the top-left corner of the frame.
+      ctx.beginPath();
+      ctx.moveTo(inset, inset);
+      ctx.arc(inset, inset, Math.round(w * 0.25), 0, Math.PI / 2);
+      ctx.closePath();
+      ctx.fillStyle = c.blue;
+      ctx.fill();
+      stroke(frame);
+      ctx.stroke();
+
+      // Red circle, top-right.
+      ctx.beginPath();
+      ctx.arc(w * 0.68, h * 0.29, 170, 0, Math.PI * 2);
+      ctx.fillStyle = c.red;
+      ctx.fill();
+      ctx.stroke();
+
+      // Yellow bar, capped by a purple half-disc at its right end.
+      const barY = h * 0.58;
+      const barH = 104;
+      const barX = w * 0.09;
+      const barW = w * 0.52;
+      ctx.beginPath();
+      ctx.arc(barX + barW, barY + barH / 2, barH / 2 + 46, -Math.PI / 2, Math.PI / 2);
+      ctx.closePath();
+      ctx.fillStyle = c.purple;
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = c.yellow;
+      ctx.fillRect(barX, barY, barW, barH);
+      ctx.strokeRect(barX, barY, barW, barH);
+
+      // Green triangle, bottom-right.
+      ctx.beginPath();
+      ctx.moveTo(w * 0.66, h * 0.9);
+      ctx.lineTo(w * 0.9, h * 0.9);
+      ctx.lineTo(w * 0.78, h * 0.71);
+      ctx.closePath();
+      ctx.fillStyle = c.green;
+      ctx.fill();
+      ctx.stroke();
+
+      // Hairline rules — the fine detail a lossy codec smears first.
+      stroke(Math.max(1, Math.round(w * P.hairline)));
+      for (let i = 0; i < 10; i += 1) {
+        const y = h * 0.77 + i * 10;
+        ctx.beginPath();
+        ctx.moveTo(barX, y);
+        ctx.lineTo(w * 0.5, y);
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = c.ink;
+      ctx.font = `700 ${Math.round(h * P.display)}px 'Archivo', sans-serif`;
+      ctx.fillText('FLAT', barX + 4, h * 0.5);
+      ctx.font = `${Math.round(h * P.caption)}px 'Space Mono', monospace`;
+      ctx.fillText('PINCH · SAMPLE 02 · GEOMETRIC', barX + 4, h * 0.935);
+
+      // Frame last, so shapes that run into it are cropped by the rule
+      // rather than painting over it.
+      stroke(frame);
+      ctx.strokeRect(inset, inset, w - inset * 2, h - inset * 2);
+
+      return canvas.toDataURL('image/png');
+    },
+    [
+      width,
+      height,
+      {
+        paper: PAPER,
+        ink: INK,
+        blue: BLUE,
+        red: RED,
+        yellow: YELLOW,
+        purple: PURPLE,
+        green: GREEN,
+      },
+      POSTER,
+      POSTER_FACES,
+    ],
+  );
+}
+
+async function buildDemos(browser, fonts) {
   console.log('demo');
-  const page = await loadPage(browser, { width: 64, height: 64, html: '<body></body>' });
+  // The fonts have to be inlined even though nothing is laid out in the DOM:
+  // `paintGradient`/`paintPoster` load the faces themselves before drawing.
+  const page = await loadPage(browser, {
+    width: 64,
+    height: 64,
+    html: `<style>${fonts}</style><body></body>`,
+  });
   try {
-    const sunset = await paintSunset(page, {
+    const gradient = await paintGradient(page, {
       width: 1600,
       height: 1200,
       type: 'image/jpeg',
-      quality: 0.8,
+      quality: 0.86,
     });
-    const sunsetFile = p('public/demo/demo-sunset.jpg');
-    record(sunsetFile, await writeDataUrl(sunsetFile, sunset), [1600, 1200]);
+    const gradientFile = p('public/demo/demo-gradient.jpg');
+    // Budgets sit just above what the current art measures (138 KB / 57 KB):
+    // these files ship in the service worker's precache, so a composition that
+    // suddenly doubles in size should fail the run rather than land quietly.
+    record(gradientFile, await writeDataUrl(gradientFile, gradient), [1600, 1200, 170 * 1024]);
 
-    const poster = await page.evaluate(
-      ([w, h, c]) => {
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = c.paper;
-        ctx.fillRect(0, 0, w, h);
-
-        const stroke = (width) => {
-          ctx.strokeStyle = c.ink;
-          ctx.lineWidth = width;
-        };
-
-        const inset = 34;
-
-        // Blue quarter-disc, anchored in the top-left corner of the frame.
-        ctx.beginPath();
-        ctx.moveTo(inset, inset);
-        ctx.arc(inset, inset, 300, 0, Math.PI / 2);
-        ctx.closePath();
-        ctx.fillStyle = c.blue;
-        ctx.fill();
-        stroke(6);
-        ctx.stroke();
-
-        // Red circle, top-right.
-        ctx.beginPath();
-        ctx.arc(w * 0.68, h * 0.29, 170, 0, Math.PI * 2);
-        ctx.fillStyle = c.red;
-        ctx.fill();
-        ctx.stroke();
-
-        // Yellow bar, capped by a purple half-disc at its right end.
-        const barY = h * 0.58;
-        const barH = 104;
-        const barX = w * 0.09;
-        const barW = w * 0.52;
-        ctx.beginPath();
-        ctx.arc(barX + barW, barY + barH / 2, barH / 2 + 46, -Math.PI / 2, Math.PI / 2);
-        ctx.closePath();
-        ctx.fillStyle = c.purple;
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = c.yellow;
-        ctx.fillRect(barX, barY, barW, barH);
-        ctx.strokeRect(barX, barY, barW, barH);
-
-        // Green triangle, bottom-right.
-        ctx.beginPath();
-        ctx.moveTo(w * 0.66, h * 0.9);
-        ctx.lineTo(w * 0.9, h * 0.9);
-        ctx.lineTo(w * 0.78, h * 0.71);
-        ctx.closePath();
-        ctx.fillStyle = c.green;
-        ctx.fill();
-        ctx.stroke();
-
-        // Hairline rules — the fine detail a lossy codec smears first.
-        stroke(2);
-        for (let i = 0; i < 10; i += 1) {
-          const y = h * 0.77 + i * 10;
-          ctx.beginPath();
-          ctx.moveTo(barX, y);
-          ctx.lineTo(w * 0.5, y);
-          ctx.stroke();
-        }
-
-        ctx.fillStyle = c.ink;
-        ctx.font = `700 ${Math.round(h * 0.085)}px 'Archivo', sans-serif`;
-        ctx.fillText('FLAT', barX + 4, h * 0.5);
-        ctx.font = `${Math.round(h * 0.024)}px 'Space Mono', monospace`;
-        ctx.fillText('PINCH · SAMPLE 02 · GEOMETRIC', barX + 4, h * 0.935);
-
-        // Frame last, so shapes that run into it are cropped by the rule
-        // rather than painting over it.
-        stroke(6);
-        ctx.strokeRect(inset, inset, w - inset * 2, h - inset * 2);
-
-        return canvas.toDataURL('image/png');
-      },
-      [
-        1200,
-        900,
-        { paper: PAPER, ink: INK, blue: BLUE, red: RED, yellow: YELLOW, purple: PURPLE, green: GREEN },
-      ],
-    );
+    const poster = await paintPoster(page, { width: 1200, height: 900 });
     const posterFile = p('public/demo/demo-poster.png');
-    record(posterFile, await writeDataUrl(posterFile, poster), [1200, 900]);
+    record(posterFile, await writeDataUrl(posterFile, poster), [1200, 900, 70 * 1024]);
   } finally {
     await page.close();
   }
@@ -722,14 +801,14 @@ async function buildScreenshots(browser) {
     await page.screenshot({ path: home });
     record(home, await fs.readFile(home), [1440, 900]);
 
-    // Feed the real pipeline a lossless PNG of the sunset — an ordinary photo
-    // export, i.e. what someone actually drops on the app. Every number in the
-    // resulting shot (bytes, %, SSIM, verdict) is computed by the app itself;
-    // nothing here stages them.
-    const source = path.join(os.tmpdir(), 'pinch-assets', 'demo-sunset.png');
+    // Feed the real pipeline a lossless PNG of the gradient sample — an
+    // ordinary photo export, i.e. what someone actually drops on the app.
+    // Every number in the resulting shot (bytes, %, SSIM, verdict) is computed
+    // by the app itself; nothing here stages them.
+    const source = path.join(os.tmpdir(), 'pinch-assets', 'demo-gradient.png');
     await writeDataUrl(
       source,
-      await paintSunset(page, { width: 1600, height: 1200, type: 'image/png' }),
+      await paintGradient(page, { width: 1600, height: 1200, type: 'image/png' }),
     );
     await page.locator('input[type=file]').first().setInputFiles(source);
 
@@ -794,7 +873,7 @@ try {
   if (targets.includes('icons')) await buildIcons(browser);
   if (targets.includes('macos')) await buildMacosIcons(browser);
   if (targets.includes('og')) await buildOg(browser, fonts);
-  if (targets.includes('demo')) await buildDemos(browser);
+  if (targets.includes('demo')) await buildDemos(browser, fonts);
   if (targets.includes('shots')) await buildScreenshots(browser);
 } finally {
   await browser.close();

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480" width="640" height="480">
+  <!--
+    Sample 03 of the bundled demo series, on the same chassis as the two
+    rasters `scripts/generate-assets.mjs` paints: paper ground, 3px ink frame
+    inset 18 (0.0283 × 0.005 of the width, as in that script's POSTER), flat
+    accent shapes outlined in ink, one block of hairlines. Green-dominant to
+    match the accent its card uses in HomeView.svelte.
+
+    No <text>: rendered through <img> an SVG cannot reach the page's
+    @font-face, so any type here would silently fall back to a system font and
+    read off-brand. The card's own label carries the naming instead.
+  -->
+  <rect width="640" height="480" fill="#FBF7EB"/>
+  <g stroke="#141414" stroke-width="3">
+    <!-- Green half-disc, anchored on the right rule so the frame crops it. -->
+    <path d="M622 70A170 170 0 0 0 622 410Z" fill="#12A147"/>
+    <circle cx="150" cy="150" r="72" fill="#1B6EF3"/>
+    <!-- Yellow bar, capped by a purple arrowhead. -->
+    <rect x="60" y="308" width="220" height="50" fill="#F5B40C"/>
+    <path d="M280 306L344 333L280 360Z" fill="#8E55E9"/>
+  </g>
+  <!-- Hairlines — the fine detail a lossy codec smears first. -->
+  <g stroke="#141414" stroke-width="1">
+    <path d="M60 230.5H250M60 237.5H250M60 244.5H250M60 251.5H250M60 258.5H250M60 265.5H250M60 272.5H250M60 279.5H250M60 286.5H250M60 293.5H250"/>
+  </g>
+  <rect x="18" y="18" width="604" height="444" fill="none" stroke="#141414" stroke-width="3"/>
+</svg>
