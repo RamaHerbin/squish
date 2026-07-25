@@ -1,0 +1,239 @@
+# Third-Party Notices
+
+Pinch is MIT-licensed (see [LICENSE](./LICENSE)). It links against the
+open-source components listed below, most of them WebAssembly builds of
+native image codecs. This file records each component's license, upstream
+source, and — where the license requires it — the attribution or source
+notice that comes with it.
+
+License texts are reproduced from the copy actually shipped in this
+repository's `node_modules/<package>` at the time of writing (npm package
+versions are pinned below); consult those files for the byte-exact text.
+
+Jump to: [Runtime dependencies](#runtime-dependencies) ·
+[HEIC/HEIF decoding (LGPL-3.0 component)](#heicheif-decoding-lgpl-30-component) ·
+[Fonts](#fonts) · [Build/dev tooling](#builddev-tooling-not-shipped-to-users)
+
+---
+
+## Runtime dependencies
+
+### @jsquash/\* (avif, jpeg, jxl, oxipng, png, qoi, resize, webp)
+
+- **npm packages:** `@jsquash/avif@2.1.1`, `@jsquash/jpeg@1.6.0`,
+  `@jsquash/jxl@1.3.0`, `@jsquash/oxipng@2.3.0`, `@jsquash/png@3.1.1`,
+  `@jsquash/qoi@1.1.0`, `@jsquash/resize@2.1.1`, `@jsquash/webp@1.5.0`
+- **Wrapper license:** Apache License 2.0 (each package's own `package.json`
+  `license` field and `node_modules/@jsquash/<name>/LICENSE`)
+- **Upstream:** <https://github.com/jamsinclair/jSquash>
+- **What it is:** thin JS/TS wrappers that load the WebAssembly builds of the
+  Squoosh app's codecs. Pinch imports these directly in
+  `src/lib/codecs/codec.worker.ts` (encode/decode for AVIF, JPEG XL, WebP,
+  MozJPEG, OxiPNG, QOI, and PNG decode) and for resizing
+  (`src/lib/codecs/codec.worker.ts`, `@jsquash/resize`). The wasm binaries
+  are used unmodified as published; nothing in this repository patches the
+  codec sources.
+
+Each wrapper bundles a wasm build of a specific upstream codec, under its own
+upstream license, reproduced below with the file it was verified against.
+
+#### mozjpeg (via `@jsquash/jpeg`)
+
+- **License:** libjpeg-turbo's three-license set — the IJG (Independent JPEG
+  Group) License, the Modified (3-clause) BSD License, and the zlib License
+  — see `node_modules/@jsquash/jpeg/codec/LICENSE.codec.md` for the full,
+  bundled text.
+- **Upstream:** <https://github.com/mozilla/mozjpeg>
+- **Notice required by the IJG license:** "This software is based in part on
+  the work of the Independent JPEG Group."
+
+#### libwebp (via `@jsquash/webp`, and PNG's shared codec base)
+
+- **License:** BSD 3-Clause — `Copyright (c) 2010, Google Inc. All rights
+  reserved.` See `node_modules/@jsquash/webp/codec/LICENSE.codec.md` (the
+  same text also ships as `node_modules/@jsquash/png/codec/LICENSE.codec.md`,
+  since `@jsquash/png`'s codec derives from the same Google-authored source).
+- **Upstream:** <https://chromium.googlesource.com/webm/libwebp>
+
+#### libavif + libaom (via `@jsquash/avif`)
+
+- **libavif license:** BSD 2-Clause — `Copyright 2019 Joe Drago`. Upstream:
+  <https://github.com/AOMediaCodec/libavif> (see `LICENSE` in that repo;
+  `@jsquash/avif`'s `codec/enc/README.md` and `codec/dec/Readme.md` cite
+  libavif v1.0.1 as the source).
+- **libaom license:** BSD 2-Clause — `Copyright (c) 2016, Alliance for Open
+  Media`. Upstream: <https://aomedia.googlesource.com/aom> (`LICENSE`).
+- **libaom patent grant:** distributed alongside the BSD license is the
+  **Alliance for Open Media Patent License 1.0**, a royalty-free patent
+  grant covering conforming AV1 encoders/decoders (libaom is AVIF's AV1
+  codec). Upstream: <https://aomedia.googlesource.com/aom> (`PATENTS`).
+- Neither license file ships inside the `@jsquash/avif` npm package itself
+  (only the top-level Apache-2.0 wrapper `LICENSE` does); the texts above
+  were verified against the upstream repositories directly.
+
+#### libjxl (via `@jsquash/jxl`)
+
+- **License:** BSD 3-Clause. Upstream: <https://github.com/libjxl/libjxl>
+  (`LICENSE`).
+- As with libavif, no separate codec-license file ships inside the
+  `@jsquash/jxl` npm package; the wrapper's own `README.md` names libjxl as
+  the wrapped library, and the text above was verified against the upstream
+  repository.
+
+#### oxipng (via `@jsquash/oxipng`)
+
+- **License:** MIT — `Copyright (c) 2016 Joshua Holmer`. See
+  `node_modules/@jsquash/oxipng/codec/LICENSE.codec.md`.
+- **Upstream:** <https://github.com/shssoichiro/oxipng>
+
+#### qoi (via `@jsquash/qoi`)
+
+- **License:** MIT — `Copyright (c) 2022 Dominic Szablewski`. See
+  `node_modules/@jsquash/qoi/codec/LICENSE.codec.md`.
+- **Upstream:** <https://github.com/phoboslab/qoi>
+
+#### resize codecs (via `@jsquash/resize`)
+
+`@jsquash/resize` bundles three interchangeable wasm resamplers; Pinch's
+worker (`src/lib/codecs/codec.worker.ts`) uses whichever the caller selects
+via `@jsquash/resize`'s public API.
+
+- **squoosh-resize** — MIT, `Copyright (c) 2015 PistonDevelopers`. See
+  `node_modules/@jsquash/resize/lib/resize/LICENSE.codec.md`.
+- **hqx** — Apache License 2.0. See
+  `node_modules/@jsquash/resize/lib/hqx/LICENSE.codec.md`.
+- **magic-kernel** — MIT, `Copyright (c) 2024 Serhii Tatarintsev`. See
+  `node_modules/@jsquash/resize/lib/magic-kernel/LICENSE.codec.md`.
+
+---
+
+### comlink
+
+- **npm package:** `comlink@4.4.2`
+- **License:** Apache License 2.0
+- **Upstream:** <https://github.com/GoogleChromeLabs/comlink>
+- **What it is:** RPC plumbing over `postMessage`, used to talk to the codec
+  worker pool.
+
+### fflate
+
+- **npm package:** `fflate@0.8.3`
+- **License:** MIT — `Copyright (c) 2026 Arjun Barrett` (as printed in
+  `node_modules/fflate/LICENSE`)
+- **Upstream:** <https://github.com/101arrowz/fflate>
+- **What it is:** zip/deflate implementation used for batch export to ZIP.
+
+### idb-keyval
+
+- **npm package:** `idb-keyval@6.3.0`
+- **License:** Apache License 2.0 — `Copyright 2016, Jake Archibald`
+- **Upstream:** <https://github.com/jakearchibald/idb-keyval>
+- **What it is:** small IndexedDB wrapper used for local persistence
+  (presets, settings).
+
+---
+
+## HEIC/HEIF decoding (LGPL-3.0 component)
+
+Pinch decodes HEIC/HEIF input (iPhone photos) through **heic-decode**, which
+wraps the **libheif** WebAssembly build published as **libheif-js**. This is
+the one runtime dependency under a copyleft license, so it gets its own
+paragraph.
+
+- **heic-decode** — npm `heic-decode@2.1.0`, license **ISC** (per
+  `node_modules/heic-decode/package.json`; the package does not ship its own
+  bundled `LICENSE` file). Author: Kiril Vatev. Upstream:
+  <https://github.com/catdad-experiments/heic-decode>. This is a thin
+  Promise-based wrapper around `libheif-js`; it contains no codec code of
+  its own.
+- **libheif-js** — npm `libheif-js@1.19.8`, an Emscripten (wasm) build of
+  **libheif** published by catdad-experiments. Upstream:
+  <https://github.com/catdad-experiments/libheif-js>, wrapping
+  <https://github.com/strukturag/libheif>. License: **LGPL-3.0**, per
+  `node_modules/libheif-js/package.json` and the full GNU LGPLv3 text at
+  `node_modules/libheif-js/LICENSE` / `node_modules/libheif-js/libheif/LICENSE`.
+  libheif's own upstream license note (bundled verbatim in that same file)
+  reads: "The library `libheif` is distributed under the terms of the GNU
+  Lesser General Public License. The sample applications and the Go and C++
+  wrappers are distributed under the terms of the MIT License."
+- **libde265**, the HEVC decoder libheif calls into for HEIC frame decoding,
+  is compiled into the same wasm bundle (`libheif-wasm/libheif-bundle.js`
+  contains its own version string). libde265 is licensed under **LGPL-3.0**
+  by its upstream project: <https://github.com/strukturag/libde265>.
+
+**How Pinch uses it, and why this satisfies LGPL-3.0:**
+
+- Pinch imports `heic-decode` unmodified, as published on npm — no source
+  file in `libheif-js` or `heic-decode` has been forked, patched, or
+  recompiled for this project. See `src/lib/codecs/codec.worker.ts`
+  (`const loadHeicDecoder = () => loadOnce('dec:heic', () =>
+  import('heic-decode'))`) — it is a dynamic `import()`, loaded only when a
+  HEIC/HEIF file is actually opened, inside a Web Worker.
+- LGPL-3.0 §4 permits combining an unmodified LGPL library with an
+  application under any license, provided the LGPL component can be swapped
+  out and its corresponding source is available. Both hold here: the wasm
+  build is dynamically loaded as a discrete, replaceable module (not statically
+  linked into Pinch's own bundle in a way that obscures the boundary), and
+  full corresponding source for libheif and libde265 is public upstream at
+  the repositories linked above (and, for the exact wasm build in use,
+  at <https://github.com/catdad-experiments/libheif-js>).
+- Pinch itself adds no HEIC/HEIF *encoding* — decode-only, deliberately
+  (`src/lib/codecs/codec.worker.ts`: "libheif (via heic-decode) — decode
+  only; HEIC encoding is patent-encumbered").
+
+---
+
+## Fonts
+
+### Archivo (@fontsource/archivo) and Space Mono (@fontsource/space-mono)
+
+- **npm packages:** `@fontsource/archivo@5.3.0`, `@fontsource/space-mono@5.3.0`
+- **Package license:** OFL-1.1 (per each package's `package.json`)
+- **Font license:** SIL Open Font License, Version 1.1
+- **Font copyright:**
+  - Archivo — Copyright 2020 The Archivo Project Authors
+    (<https://github.com/Omnibus-Type/Archivo>)
+  - Space Mono — Copyright 2016 The Space Mono Project Authors
+    (<https://github.com/googlefonts/spacemono>)
+- Full OFL-1.1 text ships at `node_modules/@fontsource/archivo/LICENSE` and
+  `node_modules/@fontsource/space-mono/LICENSE`; `@fontsource` repackages the
+  same Google Fonts files distributed at <https://fontsource.org>. OFL fonts
+  may be used, embedded, and redistributed freely as part of an application
+  (they just can't be resold on their own), which is how Pinch uses them —
+  bundled as local `@font-face` assets, no remote Google Fonts requests.
+
+---
+
+## Build/dev tooling (not shipped to users)
+
+The following are development-time dependencies only — compiled away by the
+Vite build and never present in the shipped app bundle. Listed for
+completeness, not because they impose runtime obligations.
+
+| Package | Version | License |
+|---|---|---|
+| svelte | 5.56.7 | MIT |
+| vite | 8.1.5 | MIT |
+| vitest | 4.1.10 | MIT |
+| typescript | 5.9.3 | Apache-2.0 |
+| vite-plugin-pwa | 1.3.0 | MIT |
+| @sveltejs/vite-plugin-svelte | 7.2.0 | MIT |
+
+A full scan of every `package.json` under `node_modules` (431 packages at
+time of writing, dev and runtime combined) found one `LGPL-3.0` package
+(`libheif-js`, covered above) and two files under weak-copyleft or
+attribution licenses, both build-time-only and neither shipped in the app
+bundle:
+
+- `lightningcss` / `lightningcss-darwin-arm64` — **MPL-2.0**, pulled in by
+  Vite's CSS pipeline. MPL-2.0 is file-level copyleft: it applies to
+  modifications of lightningcss's own source, not to code that merely runs
+  it as a build tool. Pinch does not vendor or modify it.
+- `caniuse-lite` — **CC-BY-4.0** (browser support data, not code), pulled in
+  transitively for build tooling. Attribution: caniuse.com / Can I Use
+  project. Not present in the shipped bundle.
+
+Every other package resolved to `MIT`, `Apache-2.0`, `ISC`, `BSD-2-Clause`,
+`BSD-3-Clause`, `BlueOak-1.0.0`, `MIT-0`, `CC0-1.0`, or `OFL-1.1` — all
+permissive. See `package-lock.json` for the full resolved tree if you need
+to audit a specific transitive package.
