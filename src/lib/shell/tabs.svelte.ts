@@ -41,9 +41,9 @@ function nextTabId(): string {
   return `tab-${nextTabSeq}`;
 }
 
-/** Same source file, by the only signal available without reading bytes. */
+/** Same source file, by the strongest signals available without reading bytes. */
 function sameFile(a: File, b: File): boolean {
-  return a.name === b.name && a.size === b.size;
+  return a.name === b.name && a.size === b.size && a.lastModified === b.lastModified;
 }
 
 class TabsStore implements TabsApi {

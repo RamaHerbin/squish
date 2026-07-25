@@ -83,14 +83,22 @@ export function createThumbnailCache(options: ThumbnailCacheOptions = {}): Thumb
       const pending = inFlight.get(key);
       if (pending) return pending;
 
-      const work = limit(() => renderThumbnail(source, size, type))
+      const work: Promise<string | undefined> = limit(() => renderThumbnail(source, size, type))
         .then((url) => {
-          if (url) touch(key, url);
+          if (!url) return undefined;
+          // `clear()`/`delete()` dropped this job while it was rendering: the
+          // owning view has already done its only cleanup, so caching now
+          // would leak the URL. Revoke instead of repopulating.
+          if (inFlight.get(key) !== work) {
+            revoke(url);
+            return undefined;
+          }
+          touch(key, url);
           return url;
         })
         .catch(() => undefined)
         .finally(() => {
-          inFlight.delete(key);
+          if (inFlight.get(key) === work) inFlight.delete(key);
         });
 
       inFlight.set(key, work);

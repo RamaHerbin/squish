@@ -111,7 +111,13 @@ function assertPixelCount(image: MetricsImage): void {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Rec.709 luma plane, one float per pixel, alpha ignored.
+ * Rec.709 luma plane, one float per pixel, alpha composited over white.
+ *
+ * Compositing matters: encoding a transparent source to an opaque format
+ * (JPEG) keeps the hidden RGB values, so ignoring alpha would score the pair
+ * near-identical while the transparent regions actually render as a solid
+ * background. White matches the checkerboard-light rendering default.
+ *
  * Exported for tests and for callers that want to compare several encodes
  * against one original without re-deriving its plane each time.
  */
@@ -122,8 +128,10 @@ export function toLuma(image: MetricsImage): Float32Array {
   const luma = new Float32Array(count);
 
   for (let i = 0, p = 0; i < count; i++, p += 4) {
-    luma[i] =
+    const pixel =
       LUMA_R * (data[p] ?? 0) + LUMA_G * (data[p + 1] ?? 0) + LUMA_B * (data[p + 2] ?? 0);
+    const alpha = (data[p + 3] ?? 255) / 255;
+    luma[i] = alpha === 1 ? pixel : pixel * alpha + 255 * (1 - alpha);
   }
   return luma;
 }

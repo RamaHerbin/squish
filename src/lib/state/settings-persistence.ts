@@ -22,7 +22,7 @@ import {
   createDefaultResizeState,
   createDefaultSideSettings,
   createSideSettings,
-  isSideSettings,
+  isSideSettingsShape,
 } from '../contracts';
 import type {
   EncoderId,
@@ -203,7 +203,9 @@ function buildSideSettings(
  * not recognisable at all.
  */
 export function sanitizeSideSettings(value: unknown): SideSettings | undefined {
-  if (!isSideSettings(value)) return undefined;
+  // Loose gate on purpose: this is our own storage, and everything below is a
+  // rebuild-from-defaults that drops junk keys and coerces bad values.
+  if (!isSideSettingsShape(value)) return undefined;
 
   const raw = value as unknown as Record<string, unknown>;
   const rawProcessor = isRecord(raw['processorState']) ? raw['processorState'] : {};

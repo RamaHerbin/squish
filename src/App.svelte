@@ -24,10 +24,12 @@
     SideSettings,
   } from './lib/contracts';
   import {
+    FILE_PICKER_ACCEPT,
     PRESET_URL_PARAM,
     cloneSideSettings,
     createDefaultSideSettings,
     createSideSettings,
+    partitionBySize,
     withEncoder,
   } from './lib/contracts';
 
@@ -193,34 +195,46 @@
 
   let shellError = $state<string | undefined>(undefined);
 
-  function imagesOf(files: readonly File[]): File[] {
-    return files.filter((file) => looksLikeImage(file));
+  /**
+   * Shared ingestion gate: keep readable images within the advertised 50 MB
+   * limit, and explain anything dropped.
+   */
+  function imagesOf(files: readonly File[]): { images: File[]; skippedNote?: string } {
+    const { accepted, oversized } = partitionBySize(files.filter((f) => looksLikeImage(f)));
+    if (oversized.length === 0) return { images: accepted };
+    const names = oversized.map((f) => f.name).join(', ');
+    return { images: accepted, skippedNote: `Skipped (over 50 MB): ${names}` };
   }
 
   /** Every file becomes a tab. Used by the header `+` and the share target. */
   function openInEditor(files: readonly File[]): void {
-    const images = imagesOf(files);
+    const { images, skippedNote } = imagesOf(files);
     if (images.length === 0) {
-      shellError = files.length > 0 ? 'That file is not an image Pinch can read.' : undefined;
+      shellError =
+        skippedNote ??
+        (files.length > 0 ? 'That file is not an image Pinch can read.' : undefined);
       return;
     }
-    shellError = undefined;
+    shellError = skippedNote;
     tabs.openMany(images);
     view = 'editor';
   }
 
   /** The home drop zone: one image is an editing session, several is a queue. */
   function handleHomeFiles(files: readonly File[]): void {
-    const images = imagesOf(files);
+    const { images, skippedNote } = imagesOf(files);
     if (images.length === 0) {
-      shellError = files.length > 0 ? 'No readable images in that drop.' : undefined;
+      shellError =
+        skippedNote ?? (files.length > 0 ? 'No readable images in that drop.' : undefined);
       return;
     }
     if (images.length === 1) {
-      openInEditor(images);
+      shellError = skippedNote;
+      tabs.openMany(images);
+      view = 'editor';
       return;
     }
-    shellError = undefined;
+    shellError = skippedNote;
     ensureQueue().add(images);
     view = 'queue';
   }
@@ -399,7 +413,7 @@
   <input
     bind:this={filePicker}
     type="file"
-    accept="image/*,.heic,.heif"
+    accept={FILE_PICKER_ACCEPT}
     multiple
     class="file-picker"
     tabindex="-1"

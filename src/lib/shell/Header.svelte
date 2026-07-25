@@ -22,6 +22,7 @@
    * owns `view` and reacts to `onnavigate`/`onbrand`/`onback`.
    */
   import type { AppView, TabsApi } from '../contracts';
+  import { FILE_PICKER_ACCEPT } from '../contracts';
   import { BrandDot } from '../ui';
 
   interface Props {
@@ -145,7 +146,7 @@
   <input
     bind:this={fileInput}
     type="file"
-    accept="image/*"
+    accept={FILE_PICKER_ACCEPT}
     multiple
     class="file-input"
     tabindex="-1"

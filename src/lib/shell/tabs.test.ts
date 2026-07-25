@@ -37,8 +37,10 @@ function fakeEngine(): JobEngine {
   };
 }
 
-function file(name: string, bytes = 64): File {
-  return new File([new Uint8Array(bytes)], name, { type: 'image/png' });
+function file(name: string, bytes = 64, lastModified = 1_000): File {
+  // Explicit lastModified: the default is Date.now(), which would make
+  // identity checks flaky across millisecond boundaries.
+  return new File([new Uint8Array(bytes)], name, { type: 'image/png', lastModified });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -60,7 +62,7 @@ describe('createTabs — open', () => {
     expect(createSession).toHaveBeenCalledTimes(1);
   });
 
-  it('dedupes by name + size instead of opening a duplicate tab', () => {
+  it('dedupes by name + size + lastModified instead of opening a duplicate tab', () => {
     const createSession = vi.fn(fakeEngine);
     const tabs = createTabs({ createSession, disposeSession: vi.fn() });
 
@@ -71,6 +73,18 @@ describe('createTabs — open', () => {
     expect(dupeId).toBe(firstId);
     expect(tabs.tabs).toHaveLength(2);
     expect(tabs.activeId).toBe(firstId);
+    expect(createSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('treats same name + size but different lastModified as distinct files', () => {
+    const createSession = vi.fn(fakeEngine);
+    const tabs = createTabs({ createSession, disposeSession: vi.fn() });
+
+    const firstId = tabs.open(file('export.png', 100, 1_000));
+    const secondId = tabs.open(file('export.png', 100, 2_000));
+
+    expect(secondId).not.toBe(firstId);
+    expect(tabs.tabs).toHaveLength(2);
     expect(createSession).toHaveBeenCalledTimes(2);
   });
 

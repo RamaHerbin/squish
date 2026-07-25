@@ -14,7 +14,12 @@
    * user has not explicitly hit "Stop".
    */
   import type { BatchItem, EncoderRegistry, Preset, PresetLibrary, SideSettings } from '../contracts';
-  import { cloneSideSettings, sideSettingsEqual } from '../contracts';
+  import {
+    FILE_PICKER_ACCEPT,
+    cloneSideSettings,
+    partitionBySize,
+    sideSettingsEqual,
+  } from '../contracts';
   import { presetLibrary as defaultPresetLibrary } from '../presets';
   import { Chip, PillButton, Popover, StatCell, Ticker } from '../ui';
   import { ENCODER_ACCENT } from '../ui';
@@ -205,10 +210,18 @@
   /** True once the user has explicitly hit "Stop" — suppresses the auto-run effect until they resume or add more files. */
   let manuallyStopped = $state(false);
 
+  let sizeNote = $state<string | undefined>(undefined);
+
   function addFiles(list: FileList | null): void {
     if (!list || list.length === 0) return;
+    const { accepted, oversized } = partitionBySize([...list]);
+    sizeNote =
+      oversized.length > 0
+        ? `Skipped (over 50 MB): ${oversized.map((f) => f.name).join(', ')}`
+        : undefined;
+    if (accepted.length === 0) return;
     manuallyStopped = false;
-    queue.add(list);
+    queue.add(accepted);
   }
 
   function onDragEnter(event: DragEvent): void {
@@ -475,6 +488,9 @@
     {#if exportError}
       <p class="banner" role="alert">Export failed: {exportError}</p>
     {/if}
+    {#if sizeNote}
+      <p class="banner" role="alert">{sizeNote}</p>
+    {/if}
 
     <!-- ------------------------------------------------------ table (desktop) -->
     <div class="table-desktop" role="table" aria-label="Queue">
@@ -669,7 +685,7 @@
     class="sr-only"
     type="file"
     multiple
-    accept="image/*,.heic,.heif"
+    accept={FILE_PICKER_ACCEPT}
     bind:this={filesInput}
     onchange={(event) => {
       addFiles(event.currentTarget.files);

@@ -11,7 +11,7 @@
  * Framework-free and side-effect-free so it can be unit tested in node.
  */
 
-import { mimeTypeFromFilename } from '../contracts';
+import { MAX_FILE_BYTES, mimeTypeFromFilename } from '../contracts';
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                       */
@@ -126,6 +126,7 @@ export function pickedFilesFromFileList(
     const path = sanitizeZipPath(relativePathOf(file)) || file.name;
     if (isIgnoredName(basename(path))) continue;
     if (!options.includeNonImages && !looksLikeImage(file, path)) continue;
+    if (file.size > MAX_FILE_BYTES) continue;
     picked.push({ file, path });
   }
 
@@ -229,6 +230,7 @@ async function walkEntry(
     if (!file) return;
     const path = sanitizeZipPath(joinPath(prefix, entry.name)) || file.name;
     if (!options.includeNonImages && !looksLikeImage(file, path)) return;
+    if (file.size > MAX_FILE_BYTES) return;
     out.push({ file, path });
     return;
   }
