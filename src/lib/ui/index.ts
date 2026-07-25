@@ -28,6 +28,7 @@ export { default as InfoCard } from './InfoCard.svelte';
 export { default as StatCell } from './StatCell.svelte';
 export { default as Ticker } from './Ticker.svelte';
 export { default as Popover } from './Popover.svelte';
+export { cursorFlair, type CursorFlairParams } from './cursor-flair';
 
 export {
   ACCENT_FILL,

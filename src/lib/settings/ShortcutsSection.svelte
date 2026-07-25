@@ -19,7 +19,7 @@
     { keys: ['←', '→'], description: 'Step the quality slider by 1.' },
     { keys: ['⌘W'], description: 'Close the active tab.' },
     { keys: ['Esc'], description: 'Close the open panel or dialog.' },
-    { keys: ['⌘K'], description: 'Command palette.', soon: true },
+    { keys: ['⌘K'], description: 'Open the file picker.' },
   ];
 </script>
 
