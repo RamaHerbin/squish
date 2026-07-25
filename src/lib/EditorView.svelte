@@ -70,6 +70,7 @@
   import { AutoSuggestController, getSharedMetricsClient } from './metrics';
   import { createEditState } from './edit/edit.svelte';
   import { rotate as rotateImage } from './edit/transform';
+  import { saveBlob } from './platform';
   import { appSettings } from './settings/settings.svelte';
 
   /** How long the pixels have to sit still before SSIM is worth paying for. */
@@ -446,17 +447,18 @@
   /* ------------------------------------------------------------------ */
 
   const downloadUrl = $derived(st.sides[1].downloadUrl);
-  const downloadName = $derived(st.sides[1].file?.name);
 
+  /**
+   * The pill is enabled off `downloadUrl` (the engine's object URL, which is
+   * exactly "an encode has landed"), but the bytes come from the `File` itself
+   * so the platform layer can hand them to a native save panel. On the web
+   * `saveBlob` is the same throwaway-anchor download as before, and it runs
+   * synchronously — no await before the click, so the gesture is preserved.
+   */
   function download(): void {
-    if (!downloadUrl || !downloadName || typeof document === 'undefined') return;
-    const anchor = document.createElement('a');
-    anchor.href = downloadUrl;
-    anchor.download = downloadName;
-    anchor.rel = 'noopener';
-    document.body.append(anchor);
-    anchor.click();
-    anchor.remove();
+    const file = st.sides[1].file;
+    if (!file) return;
+    void saveBlob(file.name, file);
   }
 
   /* ------------------------------------------------------------------ */

@@ -24,9 +24,19 @@
  * active — `virtual:pwa-register/svelte` does not resolve under plain
  * `vitest run`, so this file is intentionally not covered by
  * `shell.test.ts`.
+ *
+ * Skipped entirely in the macOS app. WKWebView refuses to register a service
+ * worker on a custom scheme, so `useRegisterSW()` on `tauri://localhost` can
+ * only ever produce a console error, and an "update available, reload" prompt
+ * is meaningless in a native app that ships its assets in the bundle. The
+ * guard is here rather than at the `UpdateToast` mount point because importing
+ * this module is what registers: the singleton below constructs at module
+ * evaluation, long before anything renders.
  */
 
 import { useRegisterSW } from 'virtual:pwa-register/svelte';
+
+import { isTauri } from '../platform';
 
 class ServiceWorkerStatus {
   /** A new version has been fetched and is waiting to take over. */
@@ -37,6 +47,12 @@ class ServiceWorkerStatus {
   #activate: (reloadPage?: boolean) => Promise<void>;
 
   constructor() {
+    if (isTauri()) {
+      // Both flags stay false, so `UpdateToast` renders nothing at all.
+      this.#activate = async () => {};
+      return;
+    }
+
     const { needRefresh, offlineReady, updateServiceWorker } = useRegisterSW({
       onRegisterError: (error: unknown) => {
         // eslint-disable-next-line no-console

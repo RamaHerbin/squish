@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Everything the Pinch window is allowed to ask the shell for: save an encoded image where the user pointed, and open a link in the browser.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+
+    "dialog:allow-save",
+
+    "fs:allow-write-file",
+    "fs:scope-download",
+    "fs:scope-desktop",
+
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://*" }]
+    }
+  ]
+}
