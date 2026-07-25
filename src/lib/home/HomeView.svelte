@@ -47,7 +47,7 @@
    * Bundled sample images (`public/demo/`) — synthetic, so no third-party
    * rights ride along, and one editorial series so the row reads as a set.
    * Each covers a different case for the codecs: continuous tone, flat
-   * artwork, vector. The two rasters are painted deterministically by
+   * artwork, vector, HDR. The three rasters are painted deterministically by
    * `scripts/generate-assets.mjs`; the SVG is hand-authored source. Sizes are
    * fetched at runtime, never hard-coded.
    */
@@ -85,9 +85,24 @@
       accent: 'green',
       format: 'SVG',
     },
+    {
+      // 10-bit PQ, so the editor's `HDR (PQ) → SDR` readout has something to
+      // fire on without asking for a phone photo. Pinch cannot encode HDR
+      // (8-bit pipeline) — this sample demonstrates detection, and the
+      // tone-mapped SDR pixels are what gets re-compressed.
+      id: 'hdr',
+      url: '/demo/demo-hdr.avif',
+      name: 'demo-hdr.avif',
+      label: 'HDR gradient poster (PQ)',
+      width: 1600,
+      height: 1200,
+      initial: 'H',
+      accent: 'purple',
+      format: 'AVIF',
+    },
   ];
 
-  const SAMPLE_SLOT_COUNT = 3;
+  const SAMPLE_SLOT_COUNT = 4;
 
   interface Props {
     /** Every image file gathered from a drop, paste, or the file picker. */
@@ -639,7 +654,18 @@
 
   .samples-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    /*
+     * 2×2, not a row of four. The samples column is 793px wide, so four cards
+     * across leaves 186px each — and a card's min-content is 235px, driven by
+     * the byte size and the pixel dimensions sitting side by side. A row of
+     * four either overflows the column by ~190px (`1fr` floors at min-content)
+     * or, with `minmax(0, 1fr)`, shrinks until the filename truncates to
+     * `demo-gr…`, which is the one string on the card nobody can do without.
+     *
+     * `minmax(0, 1fr)` is kept regardless: it is what stops a track from being
+     * floored at min-content and silently overflowing if the content grows.
+     */
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-4);
     align-items: stretch;
   }

@@ -45,7 +45,8 @@ the app works with the network switched off once it has been loaded.
 - **HDR-aware input** — PQ and HLG (read from the CICP transfer characteristic in
   AVIF/HEIC/HEIF) and gain-map HDR (Ultra HDR JPEG, Apple HEIC) are detected and
   labelled. Pixels are tone-mapped to SDR for encoding and the UI says so rather than
-  pretending the pipeline is HDR.
+  pretending the pipeline is HDR. One of the bundled samples is a genuine 10-bit PQ
+  AVIF, so the path is one click from the home screen.
 - **SSIM metrics** — a real structural-similarity score for every encode, computed in a
   dedicated worker and reported with a plain-language verdict (`Excellent`, `Soft`,
   `Watch skies`…). Unmeasurable cases (resize on, so the grids differ) say
