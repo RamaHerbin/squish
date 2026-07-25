@@ -38,9 +38,9 @@
  *   src-tauri/icons/128x128.png        128×128   from icon.svg
  *   src-tauri/icons/128x128@2x.png     256×256   from icon.svg
  *   public/og.png                      1200×630  social card
- *   public/demo/demo-gradient.jpg      1600×1200 duotone mountains, JPEG q0.86
+ *   public/demo/demo-gradient.jpg      1600×1200 duotone gradient, JPEG q0.86
  *   public/demo/demo-poster.png        1200×900  geometric poster, PNG
- *   public/demo/demo-hdr.avif          1600×1200 the same mountains, 10-bit PQ
+ *   public/demo/demo-hdr.avif          1600×1200 the same sheet, 10-bit PQ
  *   docs/media/home.png                1440×1010 app screenshot
  *   docs/media/editor.png              1440×900  app screenshot
  */
@@ -90,7 +90,7 @@ const POSTER = {
 };
 
 /**
- * Geometry of the mountain sample, in pixels, from one set of fractions.
+ * Geometry of the gradient sample, in pixels, from one set of fractions.
  *
  * Shared on purpose: `paintGradient` draws from it and `buildHdr` reads the
  * two light sources back out of it to decide which pixels are emissive. If the
@@ -99,10 +99,8 @@ const POSTER = {
  */
 function gradientGeometry(w, h, P) {
   const inset = Math.round(w * P.inset);
-  // `fx` cannot move much further left: the display word, the hairline block
-  // and the caption occupy the column up to about 0.35w.
-  const fx = Math.round(w * 0.355);
-  const fy = Math.round(h * 0.09);
+  const fx = Math.round(w * 0.4);
+  const fy = Math.round(h * 0.12);
   return {
     inset,
     frame: Math.round(w * P.frame),
@@ -110,28 +108,10 @@ function gradientGeometry(w, h, P) {
     fy,
     fw: w - inset - fx,
     fh: h - inset - fy,
-    // The ridge, in fractions of the field box: x across, y down from its top
-    // edge. Straight segments, not curves — one long hard diagonal per face is
-    // what makes a lossy codec stair-step, and it matches the flat
-    // ink-outlined shapes the rest of the series is built from.
-    ridge: [
-      [0, 0.62],
-      [0.14, 0.3],
-      [0.26, 0.5],
-      [0.44, 0.06],
-      [0.6, 0.44],
-      [0.75, 0.22],
-      [0.86, 0.42],
-      [1, 0.3],
-    ],
     /** The yellow quarter-disc, read as the sun by the HDR pass. */
     sun: { x: inset, y: inset, r: Math.round(h * 0.28) },
-    /** The cream disc straddling the ridge, read as the moon. */
-    moon: {
-      x: Math.round(fx + 0.31 * (w - inset - fx)),
-      y: Math.round(fy + 0.36 * (h - inset - fy)),
-      r: Math.round(h * 0.135),
-    },
+    /** The cream disc straddling the field's left edge, read as the moon. */
+    moon: { x: fx, y: Math.round(h * 0.42), r: Math.round(h * 0.155) },
   };
 }
 
@@ -518,18 +498,15 @@ async function buildOg(browser, fonts) {
  *
  * Each one still covers a different case for the codecs to work on:
  *
- * - `demo-gradient.jpg` — continuous tone. A duotone gradient cut into a
- *   mountain range: a graded sky over about half the sheet, ridges taking a
- *   bite out of it, and seeded film grain across the whole field. Grain is
- *   what makes a file behave like a photograph under a codec — expensive to
- *   store, cheap to lose — so the quality slider has something real to trade
- *   against, and the ridge line adds the long diagonal hard edge that lossy
- *   codecs stair-step first. Shipped at q0.86, up from the q0.80 the old
- *   sunset used: the sheet has ink edges on cream, and a demo should not be
- *   one codec fighting another codec's artefacts. Checked against q0.82 and
- *   q0.90 by eye at 5× on the ridge line and the hairline block — q0.90
- *   bought no visible improvement for its extra weight, and these files sit
- *   in the SW precache.
+ * - `demo-gradient.jpg` — continuous tone. A duotone field, roughly half the
+ *   sheet, carrying a diagonal gradient and seeded film grain. Grain is what
+ *   makes a file behave like a photograph under a codec — expensive to store,
+ *   cheap to lose — so the quality slider has something real to trade against.
+ *   Shipped at q0.86, up from the q0.80 the old sunset used: the sheet now has
+ *   ink edges on cream, and a demo should not be one codec fighting another
+ *   codec's artefacts. Checked against q0.82 and q0.90 by eye at 5× on the
+ *   disc outline and the hairline block — q0.90 bought no visible improvement
+ *   for its extra 36 KB, and these files sit in the SW precache.
  * - `demo-poster.png` — flat artwork. Large areas of solid colour and hard
  *   edges, i.e. the case where PNG/lossless wins and JPEG rings.
  * - `demo-vector.svg` — the vector case. Hand-authored in `public/demo/`
@@ -572,61 +549,42 @@ async function paintGradient(page, { width, height, type, quality }) {
       ctx.fillStyle = c.paper;
       ctx.fillRect(0, 0, w, h);
 
-      // The continuous-tone payload, cut into a mountain range. Everything
-      // else on the sheet is flat, so this field is what the quality slider
-      // actually trades against; the box is about 54% of the sheet and the
-      // ridge keeps roughly 70% of it, so a bit over a third of the image is
-      // graded, grained pixels. Its right and bottom edges land on the frame's
-      // centreline, which paints over them last.
-      const { fx, fy, fw, fh, ridge: RIDGE } = G;
-      const ridgeX = (t) => fx + t * fw;
-      const ridgeY = (t) => fy + t * fh;
-      /** Trace the range: along the ridge, down to the frame, back along it. */
-      const tracePeaks = () => {
-        ctx.beginPath();
-        ctx.moveTo(ridgeX(RIDGE[0][0]), ridgeY(RIDGE[0][1]));
-        for (const [x, y] of RIDGE.slice(1)) ctx.lineTo(ridgeX(x), ridgeY(y));
-        ctx.lineTo(fx + fw, fy + fh);
-        ctx.lineTo(fx, fy + fh);
-        ctx.closePath();
-      };
+      // The continuous-tone payload. Everything else on the sheet is flat, so
+      // this field is what the quality slider actually trades against; it is
+      // sized to about half the canvas for that reason. Its right and bottom
+      // edges land on the frame's centreline, which paints over them last.
+      const { fx, fy, fw, fh } = G;
 
-      // Paint the graded, grained field on its own canvas first, then stamp it
-      // through the ridge as a clipping path. Doing the grain in place on the
-      // main canvas is not an option: `putImageData` writes straight to the
-      // bitmap and ignores the clipping path entirely, so the noise would land
-      // on the paper around the peaks — and the paper has to stay flat, which
-      // is the whole reason the grain is confined to the field.
-      const off = document.createElement('canvas');
-      off.width = fw;
-      off.height = fh;
-      const octx = off.getContext('2d');
-
-      const field = octx.createLinearGradient(0, 0, fw, fh);
+      const field = ctx.createLinearGradient(fx, fy, fx + fw, fy + fh);
       field.addColorStop(0, c.blue);
       field.addColorStop(0.52, c.purple);
       field.addColorStop(1, c.red);
-      octx.fillStyle = field;
-      octx.fillRect(0, 0, fw, fh);
+      ctx.fillStyle = field;
+      ctx.fillRect(fx, fy, fw, fh);
 
       // A wide cream glow inside the field: more smooth tonal variation for a
       // codec to smear, at no cost in flat area.
-      const glow = octx.createRadialGradient(0, fh * 0.4, 0, 0, fh * 0.4, fh * 0.74);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(fx, fy, fw, fh);
+      ctx.clip();
+      const glow = ctx.createRadialGradient(fx, h * 0.42, 0, fx, h * 0.42, h * 0.62);
       glow.addColorStop(0, 'rgba(244,238,224,0.6)');
       glow.addColorStop(0.55, 'rgba(244,238,224,0.13)');
       glow.addColorStop(1, 'rgba(244,238,224,0)');
-      octx.fillStyle = glow;
-      octx.fillRect(0, 0, fw, fh);
+      ctx.fillStyle = glow;
+      ctx.fillRect(fx, fy, fw, fh);
+      ctx.restore();
 
-      // Film grain. Kept light (±5 levels at most) and luminance-weighted so
-      // the darkest corner stays cleaner: heavier grain is high-frequency
-      // noise that every lossy codec discards, which drags SSIM down for a
-      // reason that says nothing about the codec.
+      // Film grain, clipped to the field so the paper stays flat and cheap.
+      // Kept light (±5 levels at most) and luminance-weighted so the darkest
+      // corner stays cleaner: heavier grain is high-frequency noise that every
+      // lossy codec discards, which drags SSIM down for a reason that says
+      // nothing about the codec.
       //
       // Seeded (mulberry32), not `Math.random`: the output is committed, so
       // re-running this script must produce the same bytes rather than a diff
-      // every time. The whole box is grained, including the part the ridge
-      // clips away, so the seed walks the same pixels whatever the silhouette.
+      // every time.
       let seed = 0x9e3779b9;
       const random = () => {
         seed = (seed + 0x6d2b79f5) | 0;
@@ -634,7 +592,7 @@ async function paintGradient(page, { width, height, type, quality }) {
         t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
         return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
       };
-      const region = octx.getImageData(0, 0, fw, fh);
+      const region = ctx.getImageData(fx, fy, fw, fh);
       const px = region.data;
       for (let i = 0; i < px.length; i += 4) {
         const luma = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114) / 255;
@@ -643,26 +601,20 @@ async function paintGradient(page, { width, height, type, quality }) {
         px[i + 1] = Math.max(0, Math.min(255, px[i + 1] + noise));
         px[i + 2] = Math.max(0, Math.min(255, px[i + 2] + noise));
       }
-      octx.putImageData(region, 0, 0);
+      ctx.putImageData(region, fx, fy);
 
-      ctx.save();
-      tracePeaks();
-      ctx.clip();
-      ctx.drawImage(off, fx, fy);
-      ctx.restore();
-
-      // Ink on the ridge and the left drop — the two edges that meet paper.
-      // The frame covers the bottom and right, so they are left unstroked.
+      // Ink on the two field edges that meet paper; the frame covers the rest.
       stroke(frame);
       ctx.beginPath();
-      ctx.moveTo(fx, fy + fh);
-      for (const [x, y] of RIDGE) ctx.lineTo(ridgeX(x), ridgeY(y));
+      ctx.moveTo(fx, h - inset);
+      ctx.lineTo(fx, fy);
+      ctx.lineTo(w - inset, fy);
       ctx.stroke();
 
-      // A flat cream disc straddling the ridge: one crisp boundary running
-      // straight through a smooth gradient, which is where a lossy codec shows
-      // its ringing first. Painted after the grain so the disc itself stays
-      // clean, and after the range so it reads over both slopes.
+      // A flat cream disc straddling the field's left edge: one crisp boundary
+      // running straight through a smooth gradient, which is where a lossy
+      // codec shows its ringing first. Painted after the grain so the disc
+      // itself stays clean.
       ctx.beginPath();
       ctx.arc(G.moon.x, G.moon.y, G.moon.r, 0, Math.PI * 2);
       ctx.fillStyle = c.cream;
@@ -847,10 +799,10 @@ async function buildDemos(browser, fonts) {
       quality: 0.86,
     });
     const gradientFile = p('public/demo/demo-gradient.jpg');
-    // Budgets sit just above what the current art measures (131 KB / 57 KB):
+    // Budgets sit just above what the current art measures (138 KB / 57 KB):
     // these files ship in the service worker's precache, so a composition that
     // suddenly doubles in size should fail the run rather than land quietly.
-    record(gradientFile, await writeDataUrl(gradientFile, gradient), [1600, 1200, 150 * 1024]);
+    record(gradientFile, await writeDataUrl(gradientFile, gradient), [1600, 1200, 170 * 1024]);
 
     const poster = await paintPoster(page, { width: 1200, height: 900 });
     const posterFile = p('public/demo/demo-poster.png');
@@ -879,8 +831,8 @@ async function buildDemos(browser, fonts) {
  *   sRGB 8-bit → linear → absolute nits → BT.2020 → ST 2084 → 10-bit Y'CbCr
  *
  * Diffuse surfaces sit at `HDR_REFERENCE_NITS`; the two light sources in the
- * composition — the yellow quarter-disc and the cream disc on the ridge — are
- * treated as emissive and pushed up to `HDR_PEAK_NITS`. That headroom is what
+ * composition — the yellow quarter-disc and the cream disc on the field's edge
+ * — are treated as emissive and pushed up to `HDR_PEAK_NITS`. That headroom is what
  * makes the file HDR rather than an SDR image in an HDR container.
  *
  * Opt-in, like `macos`: it shells out to `avifenc` (libavif), which is not an
@@ -892,21 +844,27 @@ async function buildDemos(browser, fonts) {
  * this is deliberately not that, for a reason worth writing down.
  *
  * Almost everyone who opens this sample is on an SDR display, so what they
- * actually see is the browser's tone-map of it — and Chrome's maps roughly 434
- * nits onto display white. At 203 the sheet came back as 182,181,168 against
- * the artwork's 251,247,235: a grey wash that reads as a broken decode, not as
- * a demo. Sweeping the value and measuring the decoded result against the SDR
- * JPEG at four probe points (paper, sun, moon, mountain body) puts the minimum
- * here, at a mean per-channel error of 14/255; 300 gives 26, 400 gives 17, and
- * past 500 the paper keeps improving while the mountain overshoots.
+ * actually see is the browser's tone-map of it — and Chrome's puts display
+ * white somewhere around 430 nits. At 203 the sheet came back as 182,181,168
+ * against the artwork's 251,247,235: a grey wash that reads as a broken
+ * decode, not as a demo. Sweeping the value and measuring the decode against
+ * the SDR JPEG at four probe points (paper, sun, moon, field) puts the minimum
+ * here, at a mean per-channel error of 14/255:
+ *
+ *   203 → 34/255   300 → 22/255   [400 → 14/255]   500 → 15/255
+ *   600 → 16/255   700 → 17/255
+ *
+ * Past 400 the paper keeps creeping towards white while the field overshoots
+ * it, which is why the curve turns back up rather than flattening.
  *
  * The file is still honestly PQ — real ST 2084 values, a real 2× highlight
  * headroom over diffuse white. It is graded for the tone-mapper it will meet
- * rather than for a mastering suite.
+ * rather than for a mastering suite. Re-measure if the artwork changes: this
+ * number is a property of the palette, not a constant of nature.
  */
-const HDR_REFERENCE_NITS = 500;
+const HDR_REFERENCE_NITS = 400;
 /** Peak of the emissive shapes: 2× diffuse white, i.e. real headroom. */
-const HDR_PEAK_NITS = 1000;
+const HDR_PEAK_NITS = 800;
 
 const srgbToLinear = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
 
@@ -1046,10 +1004,10 @@ async function buildHdr(browser, fonts) {
         ...['--depth', '10', '--yuv', '444', '--range', 'full'],
         // q90. This is a sample to re-compress, so the grain has to survive
         // the trip in: measured as the sigma of a high-pass over a flat patch
-        // of the mountain body, the source grain is 4.58 (10-bit levels) and
-        // decodes back at 3.71 here. q82 collapses it to 0.37 — a tone sample
-        // with no tone left — and q95 only recovers 4.29 for another 108 KB,
-        // which these files, sitting in the SW precache, do not get to spend.
+        // of the field, the source grain is 4.86 (10-bit levels) and decodes
+        // back at 3.85 here. q82 collapses it to 0.39 — a tone sample with no
+        // tone left — and q95 only recovers 4.55 for another 137 KB, which
+        // these files, sitting in the SW precache, do not get to spend.
         ...['--qcolor', '90', '--qalpha', '90', '--speed', '4'],
         '--ignore-exif',
         '--ignore-xmp',
@@ -1070,7 +1028,7 @@ async function buildHdr(browser, fonts) {
         'Without it `detectHdr` in src/lib/codecs/hdr.ts sees an ordinary AVIF and the badge never fires.',
     );
   }
-  record(file, bytes, [width, height, 90 * 1024]);
+  record(file, bytes, [width, height, 105 * 1024]);
   console.log(`  ${''.padEnd(34)} PQ, 10-bit, peak ${peak.toFixed(0)} nits`);
 }
 
