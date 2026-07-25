@@ -10,9 +10,20 @@
    * is no mobile comp for Settings, so this follows the same "scroll rather
    * than shrink further" rule as the tab strip.
    */
-  import { BrandDot } from '../ui';
+  import { BrandDot, cursorFlair } from '../ui';
   import type { AccentName } from '../ui';
   import { SETTINGS_SECTIONS, type SettingsSectionId } from '../contracts';
+
+  /** Blob fill per section. `about` blooms in ink, the rest in their accent. */
+  const FLAIR_COLOR: Record<AccentName, string> = {
+    blue: 'var(--accent-blue)',
+    red: 'var(--accent-red)',
+    yellow: 'var(--accent-yellow)',
+    green: 'var(--accent-green)',
+    purple: 'var(--accent-purple)',
+    ink: 'var(--ink)',
+    muted: 'var(--muted)',
+  };
 
   interface Props {
     active: SettingsSectionId;
@@ -39,8 +50,10 @@
       type="button"
       class="item"
       class:active={isActive}
+      data-accent={meta.accent}
       aria-current={isActive ? 'page' : undefined}
       onclick={() => onSelect(id)}
+      use:cursorFlair={{ color: FLAIR_COLOR[meta.accent], enabled: !isActive }}
     >
       <BrandDot accent={isActive ? 'var(--paper-white)' : meta.accent} size={11} />
       <span class="label">{meta.label}</span>
@@ -81,6 +94,57 @@
 
   .item:hover:not(.active) {
     background: var(--cream);
+  }
+
+  /* ── Cursor flair (cursorFlair action) ─────────────────────────────
+     The action injects .flair/.flair__blob outside Svelte's scope, hence
+     the :global selectors. The blob lives under the content; every other
+     child is lifted above it. */
+  .item {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .item > :global(:not(.flair)) {
+    position: relative;
+    z-index: 1;
+  }
+
+  .item :global(.flair) {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    will-change: transform;
+  }
+
+  .item :global(.flair__blob) {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 150%;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
+  }
+
+  .item :global(.flair__blob.is-in) {
+    transform: translate(-50%, -50%) scale(1);
+    transition-duration: 400ms;
+  }
+
+  /* The active card is a solid blue fill; no blob on top of it. */
+  .active :global(.flair) {
+    display: none;
+  }
+
+  /* Content flips to a readable color as the blob covers the card. Yellow
+     keeps ink text; every other accent is dark enough for cream. */
+  .item:hover:not(.active):not([data-accent='yellow']) {
+    color: var(--cream);
+    transition: color 200ms ease 120ms;
   }
 
   .spacer {
