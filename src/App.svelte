@@ -60,7 +60,8 @@
   import { appSettings } from './lib/settings/settings.svelte';
 
   import { createBatchQueue, looksLikeImage, type BatchQueueStore } from './lib/batch';
-  import { initPlatform, openExternalLink } from './lib/platform';
+  import { initPlatform, openExternal, openExternalLink } from './lib/platform';
+  import { initMenuListener } from './lib/platform/menu-listener';
   import { readPresetFromLocation } from './lib/presets';
   import { disposeSharedMetricsClient, getSharedMetricsClient } from './lib/metrics';
 
@@ -409,14 +410,40 @@
    * on the window would. Files can arrive again at any time (Dock drop, second
    * launch), each batch additive.
    */
-  onMount(() =>
-    initPlatform({
+  onMount(() => {
+    const disposePlatform = initPlatform({
       onFiles: (files) => openInEditor(files),
       onError: (message) => {
         shellError = message;
       },
-    }),
-  );
+    });
+
+    // Native menu bar. A no-op on the web; the promise resolves after the
+    // dynamic import, so teardown holds the unsubscribe once it exists.
+    let disposeMenu: (() => void) | undefined;
+    let menuGone = false;
+    void initMenuListener({
+      open: () => filePicker?.click(),
+      closeTab: () => {
+        const active = tabs.active;
+        if (active) tabs.close(active.id);
+      },
+      settings: () => go('settings'),
+      view: (v) => {
+        if (v === 'editor' || v === 'matrix' || v === 'queue') go(v);
+      },
+      github: () => void openExternal('https://github.com/RamaHerbin/squish'),
+    }).then((dispose) => {
+      if (menuGone) dispose();
+      else disposeMenu = dispose;
+    });
+
+    return () => {
+      disposePlatform();
+      menuGone = true;
+      disposeMenu?.();
+    };
+  });
 
   onDestroy(() => {
     queue?.dispose();

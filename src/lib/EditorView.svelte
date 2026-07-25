@@ -70,7 +70,7 @@
   import { AutoSuggestController, getSharedMetricsClient } from './metrics';
   import { createEditState } from './edit/edit.svelte';
   import { rotate as rotateImage } from './edit/transform';
-  import { saveBlob } from './platform';
+  import { messageOf, saveBlob } from './platform';
   import { appSettings } from './settings/settings.svelte';
 
   /** How long the pixels have to sit still before SSIM is worth paying for. */
@@ -455,10 +455,17 @@
    * `saveBlob` is the same throwaway-anchor download as before, and it runs
    * synchronously — no await before the click, so the gesture is preserved.
    */
+  let saveError = $state<string | undefined>(undefined);
+
   function download(): void {
     const file = st.sides[1].file;
     if (!file) return;
-    void saveBlob(file.name, file);
+    saveError = undefined;
+    // No await before the anchor click on the web path, so the user gesture is
+    // preserved; the catch only ever fires on the native dialog/fs path.
+    saveBlob(file.name, file).catch((error) => {
+      saveError = `Could not save: ${messageOf(error)}`;
+    });
   }
 
   /* ------------------------------------------------------------------ */
@@ -476,6 +483,9 @@
 <div class="editor">
   {#if st.error}
     <p class="editor-error" role="alert">{st.error}</p>
+  {/if}
+  {#if saveError}
+    <p class="editor-error" role="alert">{saveError}</p>
   {/if}
 
   <div class="editor-stage">

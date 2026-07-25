@@ -97,12 +97,16 @@
 
   // Routed through the platform seam like every other save in the app: the web
   // branch is the same object-URL anchor this used to inline (click inside the
-  // gesture, revoke after 60s), the macOS branch is the native save panel. Same
-  // fire-and-forget shape as `batch/zip.ts`'s `downloadBlob`.
+  // gesture, revoke after 60s), the macOS branch is the native save panel,
+  // whose failures (full disk, revoked permission) surface in the import/export
+  // error line instead of vanishing as an unhandled rejection.
   function exportPresets(): void {
+    importError = '';
     const json = JSON.stringify(presetLibrary.presets, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
-    void saveBlob('pinch-presets.json', blob);
+    saveBlob('pinch-presets.json', blob).catch((error) => {
+      importError = `Export failed: ${error instanceof Error ? error.message : String(error)}`;
+    });
   }
 
   function triggerImport(): void {

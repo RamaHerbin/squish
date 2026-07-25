@@ -9,8 +9,6 @@
     "dialog:allow-save",
 
     "fs:allow-write-file",
-    "fs:scope-download",
-    "fs:scope-desktop",
 
     {
       "identifier": "opener:allow-open-url",

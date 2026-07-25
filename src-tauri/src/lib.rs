@@ -117,26 +117,67 @@ fn pinch_frontend_ready(app: AppHandle, state: tauri::State<'_, OpenedFilesState
     }
 }
 
+/// Mirrors `MAX_FILE_BYTES` in `src/lib/contracts/image.ts` — the "MAX 50 MB
+/// / FILE" contract the UI advertises. Enforced here too, so an oversized file
+/// is rejected from metadata alone instead of being read into memory first.
+const MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
+
+/// Canonicalise a requested path and check it against the opened-files
+/// whitelist. Symlinks and `/tmp` vs `/private/tmp` cannot dodge or fake
+/// authorisation because both sides of the comparison are canonical.
+fn authorized_path(
+    state: &tauri::State<'_, OpenedFilesState>,
+    path: &str,
+) -> Result<PathBuf, String> {
+    let requested = std::fs::canonicalize(PathBuf::from(path))
+        .map_err(|error| format!("cannot resolve {path}: {error}"))?;
+    if !lock(&state.0).authorized.contains(&requested) {
+        return Err(format!("not a file this app was asked to open: {path}"));
+    }
+    Ok(requested)
+}
+
 /// Hand the bytes of an opened file to the frontend.
 ///
-/// Serves only paths previously emitted through [`FILES_OPENED_EVENT`]; the
-/// request is canonicalised before the comparison so `/tmp` vs `/private/tmp`
-/// and symlinks cannot dodge or fake authorisation. Returns raw bytes
-/// ([`tauri::ipc::Response`]), so a 40 MB HEIC does not crawl through JSON.
+/// Serves only whitelisted paths (see [`authorized_path`]), refuses anything
+/// over [`MAX_READ_BYTES`] before reading a single byte, and returns raw bytes
+/// ([`tauri::ipc::Response`]) so a 40 MB HEIC does not crawl through JSON.
 /// `async` keeps the read off the IPC thread.
 #[tauri::command]
 async fn read_opened_file(
     path: String,
     state: tauri::State<'_, OpenedFilesState>,
 ) -> Result<tauri::ipc::Response, String> {
-    let requested = std::fs::canonicalize(PathBuf::from(&path))
-        .map_err(|error| format!("cannot resolve {path}: {error}"))?;
-    if !lock(&state.0).authorized.contains(&requested) {
-        return Err(format!("not a file this app was asked to open: {path}"));
+    let requested = authorized_path(&state, &path)?;
+    let meta = std::fs::metadata(&requested)
+        .map_err(|error| format!("cannot stat {path}: {error}"))?;
+    if meta.len() > MAX_READ_BYTES {
+        return Err(format!("{path} is over the 50 MB per-file limit"));
     }
     let bytes =
         std::fs::read(&requested).map_err(|error| format!("cannot read {path}: {error}"))?;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Modification time of an opened file, in milliseconds since the epoch.
+///
+/// The frontend stamps it onto the constructed `File` so the tab store's
+/// (name, size, lastModified) dedupe recognises a re-opened path instead of
+/// spawning a duplicate tab. Same whitelist as [`read_opened_file`].
+#[tauri::command]
+fn opened_file_mtime(
+    path: String,
+    state: tauri::State<'_, OpenedFilesState>,
+) -> Result<u64, String> {
+    let requested = authorized_path(&state, &path)?;
+    let modified = std::fs::metadata(&requested)
+        .and_then(|meta| meta.modified())
+        .map_err(|error| format!("cannot stat {path}: {error}"))?;
+    let millis = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| format!("mtime before the epoch: {error}"))?
+        .as_millis();
+    Ok(u64::try_from(millis).unwrap_or(u64::MAX))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -158,7 +199,11 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .manage(OpenedFilesState::default())
-        .invoke_handler(tauri::generate_handler![pinch_frontend_ready, read_opened_file])
+        .invoke_handler(tauri::generate_handler![
+            pinch_frontend_ready,
+            read_opened_file,
+            opened_file_mtime
+        ])
         .on_page_load(|webview, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
                 let state = webview.state::<OpenedFilesState>();

@@ -6,3 +6,4 @@ coverage
 design-ref
 launch-kit
 src-tauri/target
+.claude

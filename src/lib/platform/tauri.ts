@@ -98,6 +98,9 @@ const FRONTEND_READY_COMMAND = 'pinch_frontend_ready';
  */
 const READ_OPENED_FILE_COMMAND = 'read_opened_file';
 
+/** Same whitelist as the read command; returns mtime in epoch milliseconds. */
+const OPENED_FILE_MTIME_COMMAND = 'opened_file_mtime';
+
 /**
  * Subscribe to files handed over by the operating system.
  *
@@ -151,12 +154,18 @@ async function filesFromPaths(
     paths.map(async (path): Promise<File | ReadFailure> => {
       const name = basenameOf(path);
       try {
-        const raw = await invoke<IpcBytes>(READ_OPENED_FILE_COMMAND, { path });
+        // The real mtime keeps the tab store's (name, size, lastModified)
+        // dedupe stable across re-opens of the same path. Its failure is not
+        // worth losing the file over: fall back to the epoch, a stable value.
+        const [raw, mtime] = await Promise.all([
+          invoke<IpcBytes>(READ_OPENED_FILE_COMMAND, { path }),
+          invoke<number>(OPENED_FILE_MTIME_COMMAND, { path }).catch(() => 0),
+        ]);
         const type = mimeTypeForPath(path);
-        // `lastModified` defaults to now. The metadata read that would give the
-        // real mtime needs a permission we deliberately do not hold, and
-        // nothing downstream treats it as more than a cache key.
-        return new File([bytesOf(raw)], name, type === '' ? {} : { type });
+        return new File([bytesOf(raw)], name, {
+          lastModified: mtime,
+          ...(type === '' ? {} : { type }),
+        });
       } catch (error) {
         return { name, reason: messageOf(error) };
       }
