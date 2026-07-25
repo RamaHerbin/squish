@@ -26,7 +26,11 @@ build to Tauri's bundler. On a machine with only the Apple Silicon Rust target i
 Silicon-only build:
 
 - The app: `src-tauri/target/release/bundle/macos/Pinch.app`
-- The disk image: `src-tauri/target/release/bundle/dmg/Pinch_0.1.0_aarch64.dmg`
+- The disk image: `src-tauri/target/release/bundle/dmg/Pinch_<version>_aarch64.dmg`
+
+`<version>` is whatever `package.json` says: `src-tauri/tauri.conf.json` points its `version`
+field at that file rather than restating the number, so the bundle, the DMG filename and the
+**App → About Pinch** panel all follow it automatically.
 
 For a build that also runs on Intel Macs, add the second target once and pass
 `--target universal-apple-darwin`:
@@ -41,6 +45,19 @@ noticeably longer compile.
 
 For day-to-day development, `npm run tauri:dev` opens the native window against the Vite
 dev server, with hot reload working exactly as it does in a browser tab.
+
+## Releasing one
+
+You do not have to build locally to get a distributable. Pushing a `v*` tag runs
+[`.github/workflows/macos.yml`](../.github/workflows/macos.yml) on a `macos-14` runner,
+which checks that the tag matches `package.json`, re-runs `npm run check` and `npm test`,
+builds the universal bundle, uploads the `.dmg` as a workflow artifact, and opens a
+**draft** GitHub Release with the `CHANGELOG.md` section for that version as its body.
+The draft is deliberate: a human reviews the notes and the download before anything goes
+public.
+
+Cutting the tag is `npm run release <major|minor|patch>` from a clean `main` — see the
+Releases section of [CONTRIBUTING.md](../CONTRIBUTING.md) for the whole sequence.
 
 ## Opening it the first time
 
