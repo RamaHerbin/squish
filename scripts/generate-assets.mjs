@@ -293,7 +293,7 @@ p b{font-weight:700;color:${INK}}
      you are trading away before you download.</p>
   <div class="chips">
     <div class="row">${codecs}</div>
-    <div class="row"><span class="chip blue">SSIM VERDICTS</span><span class="chip green">BATCH + ZIP</span><span class="chip purple">WORKS OFFLINE</span></div>
+    <div class="row"><span class="chip">HEIC INPUT</span><span class="chip blue">SSIM VERDICTS</span><span class="chip green">BATCH + ZIP</span><span class="chip purple">WORKS OFFLINE</span></div>
   </div>
 </div>
 <div class="strip">
