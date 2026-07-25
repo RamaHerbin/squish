@@ -5,13 +5,10 @@
    * (padding, radii, badge treatment, colours) — relocated here since they
    * are "about the app", not a default to tune.
    */
+  import { APP_VERSION_TAG } from '$lib/contracts';
   import { openExternalLink } from '../platform';
   import { BrandDot } from '../ui';
   import SectionHeader from './SectionHeader.svelte';
-
-  // Bumped by hand alongside package.json until the shell exposes a build-time
-  // version constant.
-  const VERSION = '0.1.0';
 </script>
 
 <div class="section">
@@ -19,7 +16,7 @@
 
   <div class="row">
     <span class="mono-label">Version</span>
-    <span class="version mono">Pinch v{VERSION}</span>
+    <span class="version mono">Pinch {APP_VERSION_TAG}</span>
   </div>
 
   <div class="block">

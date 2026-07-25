@@ -126,10 +126,10 @@ it is just slower. Deploying your own instance: see [docs/deploy.md](./docs/depl
 
 Pinch also ships as a native macOS app: the same web build, running in a Tauri 2 window
 instead of a browser tab, with a native save dialog and Finder file associations for
-opening images directly. Build it yourself with `npm run tauri:build`, or grab a build
-from the [Releases page](https://github.com/RamaHerbin/squish/releases) once one is
-published there. See [docs/macos.md](./docs/macos.md) for the full walkthrough, including
-what to do about the unsigned-app warning on first launch.
+opening images directly. Grab the `.dmg` from the
+[Releases page](https://github.com/RamaHerbin/squish/releases), or build it yourself with
+`npm run tauri:build`. See [docs/macos.md](./docs/macos.md) for the full walkthrough,
+including what to do about the unsigned-app warning on first launch.
 
 ## Architecture
 

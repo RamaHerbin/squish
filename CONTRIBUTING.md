@@ -113,6 +113,88 @@ browser automation. A `*.test.ts` file sits next to the source it covers
 `src/lib/contracts/contracts.test.ts` next to `src/lib/contracts/`). The suite
 is 400+ tests and growing; run `npm test` before every PR.
 
+## Commit messages
+
+[Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
+`type(scope): subject`, subject in lowercase, imperative, no trailing period.
+
+Types in use: `feat`, `fix`, `chore`, `style`, `revert`, `docs`, `refactor`,
+`perf`, `test`, `ci`. Scopes are the feature they touch — `(codecs)`, `(batch)`,
+`(pwa)`, `(ui)`, `(demo)`, `(ci)` — and are optional on changes that genuinely
+cut across everything.
+
+Two things worth knowing:
+
+- **Bodies carry the reasoning.** The subject says what changed; the body says
+  why, what you measured, and what you rejected. `git log` here reads as a
+  design record, and that is deliberate — wrap at 72 columns and write prose.
+- **Breaking changes are marked**, either `feat!:` or a `BREAKING CHANGE:`
+  footer. That is what turns a release into a major bump, so it is the one
+  convention that changes a version number.
+
+Nothing enforces this — there is no commitlint and no hook. It holds because
+people follow it.
+
+## Releases
+
+Pinch ships on two clocks, and only one of them is versioned.
+
+**The web app deploys continuously.** Vercel's Git integration builds every push
+to `main`; there is no version gate, no tag, no changelog entry. `ci.yml`
+deliberately has no deploy step so the two never fight (see `docs/deploy.md`).
+
+**A `v*` tag is a milestone.** It builds the macOS DMG through
+`.github/workflows/macos.yml` and opens a draft GitHub Release whose body is the
+CHANGELOG section for that version. It does not affect the web app at all.
+
+Versions follow [SemVer](https://semver.org/spec/v2.0.0.html) and the changelog
+follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+### The version lives in one place
+
+`package.json` is the only file a human edits. Everything else derives from it:
+
+| Surface | How it gets the version |
+| --- | --- |
+| The UI (footer ticker, Settings → About) | `APP_VERSION` from `$lib/contracts`, frozen in by the `define` block in `vite.config.ts` |
+| The macOS bundle, the DMG filename, **App → About Pinch** | `src-tauri/tauri.conf.json`, whose `version` is the *path* `../package.json` |
+| `src-tauri/Cargo.toml`, both lockfiles | rewritten by `scripts/release.mjs` |
+
+So never type a version number into a component, a config or a doc.
+`src/lib/contracts/version.test.ts` runs in CI and fails the suite if any of
+those surfaces drifts — including if someone replaces the Tauri indirection with
+a literal.
+
+### Cutting one
+
+1. **Keep `## [Unreleased]` current as you go.** Add to it in the PR that
+   changes behaviour, not in a scramble at release time. `scripts/release.mjs`
+   refuses to run if that section is empty, so a release without notes is
+   impossible by construction.
+2. From a clean, up-to-date `main`:
+
+   ```sh
+   npm run release minor          # major | minor | patch | an explicit x.y.z
+   npm run release minor --dry-run   # see what it would do first
+   ```
+
+   It checks the preconditions, runs `check` and `test`, bumps `package.json`
+   (and the lockfile) plus the Cargo crate, promotes `## [Unreleased]` to a
+   dated heading with its link reference, then commits `chore(release): vX.Y.Z`
+   and creates an annotated tag carrying the notes.
+3. It stops there on purpose. Read the diff, then:
+
+   ```sh
+   git push origin main --follow-tags
+   ```
+4. The macOS workflow verifies the tag matches `package.json`, re-runs
+   `check`/`test`, builds the universal DMG and opens a **draft** release.
+   Review the download and the notes, then publish it.
+
+macOS builds are unsigned and un-notarised, and the Tauri updater is not
+enabled, so a new version means downloading a new DMG. `macos.yml` documents the
+exact secrets that would change that.
+
 ## Opening a PR
 
 - Keep PRs small and focused on one change. A PR that touches an encoder's
@@ -121,6 +203,8 @@ is 400+ tests and growing; run `npm test` before every PR.
 - `npm run check` and `npm test` must both be green.
 - Describe what changed and why in the PR description; link the issue it
   closes, if any.
+- Add a line to `## [Unreleased]` in `CHANGELOG.md` if the change is one a user
+  would notice.
 - If you're adding or changing behavior a reader can see, say how you
   verified it (which codec/image/browser you tried it against) — there's no
   CI screenshot bot here to do that for you.

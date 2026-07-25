@@ -1,4 +1,5 @@
 /// <reference types="vitest/config" />
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
@@ -47,7 +48,24 @@ const IMAGE_FILE_HANDLER_ACCEPT: Record<string, string[]> = {
   'image/svg+xml': ['.svg'],
 };
 
+/**
+ * `package.json` is the single source of truth for the app version: this
+ * `define` is what lets `src/lib/contracts/version.ts` hand it to the UI, and
+ * `src-tauri/tauri.conf.json` points its own `version` at the same file. Read
+ * as JSON rather than imported so this config keeps its "no app source"
+ * property — package.json is metadata, not a module.
+ */
+const { version: APP_VERSION } = JSON.parse(
+  readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf8'),
+) as { version: string };
+
 export default defineConfig({
+  // The version is frozen into the bundle as a literal, so nothing has to
+  // restate it. `src/lib/contracts/version.test.ts` asserts every surface that
+  // carries a version still agrees with package.json.
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   // NOTE ($lib alias): tsconfig.json declares `paths: { "$lib/*": [...] }`
   // for editor/type-checking support, but Vite itself never learns about
   // path-mapping from tsconfig — it needs its own `resolve.alias`, which
