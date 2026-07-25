@@ -1,0 +1,14 @@
+<!--
+  Maskable variant: the OS clips this into its own shape (circle, squircle,
+  rounded square…), so the background must be edge-to-edge with NO corner
+  rounding of our own, and the mark must sit inside the ~40%-radius safe
+  zone so it survives every clip shape. See:
+  https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Manifest/Reference/icons#maskable
+
+  Same brand mark as icon.svg — cream paper, one ink-bordered blue square —
+  just re-centred with extra margin for the clip.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Pinch">
+  <rect width="512" height="512" fill="#FBF7EB"/>
+  <rect x="176" y="176" width="160" height="160" rx="34" fill="#1B6EF3" stroke="#141414" stroke-width="12"/>
+</svg>
