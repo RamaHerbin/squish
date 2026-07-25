@@ -13,7 +13,8 @@
    * Renders an `<a>` when `href` is set, a real `<button>` otherwise.
    */
   import type { Snippet } from 'svelte';
-  import type { ControlFont, PillSize, PillVariant } from './types';
+  import { cursorFlair } from './cursor-flair';
+  import { accentFill, type ControlFont, type PillSize, type PillVariant } from './types';
 
   interface Props {
     children: Snippet;
@@ -39,6 +40,16 @@
     leading?: Snippet;
     /** Trailing adornment — "↗", a shortcut hint, a caret. */
     trailing?: Snippet;
+    /**
+     * Opt into the cursor-flair bloom, with this colour as the blob fill (an
+     * accent name or any CSS colour). Omit it and the action never mounts.
+     */
+    flair?: string;
+    /**
+     * Label colour while the blob covers the pill. Defaults to the inverse of
+     * the variant's own fill: ink on `solid`, cream on `outline`/`accent`.
+     */
+    flairLabel?: string;
     onclick?: (event: MouseEvent) => void;
   }
 
@@ -61,11 +72,26 @@
     id,
     leading,
     trailing,
+    flair,
+    flairLabel,
     onclick,
   }: Props = $props();
 
   const padding = $derived(size >= 52 ? 26 : size >= 44 ? 22 : 18);
-  const style = $derived(`--pill-h: ${size}px; --pill-px: ${padding}px;`);
+
+  const flairColor = $derived(flair ? accentFill(flair) : undefined);
+  const flairLabelColor = $derived(
+    flairLabel ?? (variant === 'solid' ? 'var(--ink)' : 'var(--cream)'),
+  );
+
+  /**
+   * Pills are wide and squat, so the default 150% blob leaves a sliver
+   * uncovered when the cursor enters by a short edge. 200% closes the gap.
+   */
+  const style = $derived(
+    `--pill-h: ${size}px; --pill-px: ${padding}px;` +
+      (flairColor ? ` --pill-flair-label: ${flairLabelColor}; --flair-size: 200%;` : ''),
+  );
 </script>
 
 {#if href}
@@ -77,10 +103,12 @@
     class="pill-button {variant} font-{font}"
     class:full={fullWidth}
     class:disabled
+    class:has-flair={Boolean(flairColor)}
     {style}
     aria-label={ariaLabel}
     aria-disabled={disabled ? 'true' : undefined}
     rel={target === '_blank' ? 'noreferrer noopener' : undefined}
+    use:cursorFlair={{ color: flairColor ?? 'transparent', enabled: Boolean(flairColor) }}
   >
     {#if leading}<span class="adornment">{@render leading()}</span>{/if}
     <span class="label">{@render children()}</span>
@@ -95,12 +123,14 @@
     {onclick}
     class="pill-button {variant} font-{font}"
     class:full={fullWidth}
+    class:has-flair={Boolean(flairColor)}
     {style}
     aria-label={ariaLabel}
     aria-pressed={ariaPressed}
     aria-expanded={ariaExpanded}
     aria-haspopup={ariaHasPopup ? 'true' : undefined}
     aria-controls={ariaControls}
+    use:cursorFlair={{ color: flairColor ?? 'transparent', enabled: Boolean(flairColor) }}
   >
     {#if leading}<span class="adornment">{@render leading()}</span>{/if}
     <span class="label">{@render children()}</span>
@@ -186,6 +216,37 @@
 
   .pill-button:active:not(:disabled, .disabled) {
     transform: translateY(1px);
+  }
+
+  /* ── Cursor flair (cursorFlair action) ─────────────────────────────
+     The blob is styled globally in app.css since the action injects it outside
+     Svelte's scope. Here we clip it to the pill and lift the label above it.
+     Scoped to .has-flair so the plain pills keep their unclipped box. */
+  .has-flair {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .has-flair > :global(:not(.flair)) {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* The label flips to the inverse ink once the blob has covered the pill.
+     The shorthand repeats background/transform so the base crossfade and the
+     1px press survive the hover. */
+  .has-flair:hover:not(:disabled, .disabled) {
+    color: var(--pill-flair-label);
+    transition:
+      background var(--duration-fast) var(--ease-standard),
+      transform var(--duration-fast) var(--ease-standard),
+      color 200ms ease 120ms;
+  }
+
+  /* `enabled` is read once at mount, so a pill disabled later hides the blob. */
+  .has-flair:disabled :global(.flair),
+  .has-flair.disabled :global(.flair) {
+    display: none;
   }
 
   .pill-button:disabled,

@@ -8,8 +8,9 @@
  * become a CSS transition, `prefers-reduced-motion` gets instant show/hide.
  *
  * The action injects `<span class="flair"><span class="flair__blob">` as the
- * node's first child; the host styles both (position, size, z-index) so the
- * blob sits under the content. See SettingsNav.svelte for the reference CSS.
+ * node's first child. Those nodes land outside every component's scoped styles,
+ * so they are styled globally in app.css; the host only clips them and lifts
+ * its own content above the blob. See SettingsNav.svelte and PillButton.svelte.
  */
 
 import type { Action } from 'svelte/action';
