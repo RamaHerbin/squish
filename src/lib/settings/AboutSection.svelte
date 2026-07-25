@@ -32,17 +32,28 @@
     </div>
 
     <div class="links">
-<!-- Real destinations don't exist yet — cards render non-interactive until they do. -->
-      <span class="link-card docs" aria-disabled="true">
+      <a
+        class="link-card docs"
+        href="https://github.com/RamaHerbin/squish#readme"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
         <span class="badge">DOCS</span>
-        <span class="link-label">pinch.app/formats</span>
-      </span>
-      <span class="link-card git" aria-disabled="true">
-        <span class="badge">GIT</span>
-        <span class="link-label">github.com/pinch-app</span>
+        <span class="link-label">README</span>
         <span class="spacer"></span>
         <span class="arrow" aria-hidden="true">↗</span>
-      </span>
+      </a>
+      <a
+        class="link-card git"
+        href="https://github.com/RamaHerbin/squish"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <span class="badge">GIT</span>
+        <span class="link-label">github.com/RamaHerbin/squish</span>
+        <span class="spacer"></span>
+        <span class="arrow" aria-hidden="true">↗</span>
+      </a>
     </div>
   </div>
 </div>
@@ -108,6 +119,12 @@
     border-radius: var(--radius-md);
     padding: 10px 13px;
     min-width: 0;
+    text-decoration: none;
+    transition: opacity var(--duration-fast) var(--ease-standard);
+  }
+
+  .link-card:hover {
+    opacity: 0.82;
   }
 
   .docs {

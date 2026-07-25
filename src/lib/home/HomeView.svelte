@@ -34,23 +34,32 @@
   }
 
   /**
-   * Bundled sample images (`public/demo/`). The comp mocks up three cards
-   * with invented photo/screenshot content; only two real assets ship with
-   * the app, so the third grid slot renders the comp's own fallback — "real
-   * demo image or cream herringbone placeholder" — rather than inventing a
-   * file that doesn't exist.
+   * Bundled sample images (`public/demo/`), generated deterministically by
+   * `scripts/generate-assets.mjs` — synthetic, so no third-party rights ride
+   * along. Sizes are fetched at runtime, never hard-coded.
    */
   const DEMO_SAMPLES: readonly DemoSample[] = [
     {
-      id: 'mountains',
-      url: '/demo/demo-mountains.svg',
-      name: 'demo-mountains.svg',
-      label: 'Gradient mountains',
-      width: 640,
-      height: 480,
-      initial: 'M',
+      id: 'sunset',
+      url: '/demo/demo-sunset.jpg',
+      name: 'demo-sunset.jpg',
+      label: 'Sunset gradient photo',
+      width: 1600,
+      height: 1200,
+      initial: 'S',
       accent: 'blue',
-      format: 'SVG',
+      format: 'JPEG',
+    },
+    {
+      id: 'poster',
+      url: '/demo/demo-poster.png',
+      name: 'demo-poster.png',
+      label: 'Geometric poster',
+      width: 1200,
+      height: 900,
+      initial: 'P',
+      accent: 'red',
+      format: 'PNG',
     },
     {
       id: 'orbit',
@@ -60,7 +69,7 @@
       width: 640,
       height: 480,
       initial: 'O',
-      accent: 'red',
+      accent: 'green',
       format: 'SVG',
     },
   ];
@@ -278,7 +287,7 @@
           </div>
           <div class="spec-row">
             <span class="spec-label">Batch</span>
-            <Chip tone="green">Up to 200 files</Chip>
+            <Chip tone="green">Up to 5,000 files</Chip>
           </div>
         </div>
       {/if}
@@ -402,7 +411,7 @@
       {#if !isCompact}
         <span class="ticker-cta">Let's squash</span>
       {/if}
-      <span>v2.0</span>
+      <span>v0.1.0</span>
     {/snippet}
   </Ticker>
 </div>
