@@ -55,7 +55,7 @@
     savingsPct,
   } from './contracts';
 
-  import { getCapabilities, hdrLabel } from './codecs';
+  import { getCapabilities, hdrLabel, toSrgb } from './codecs';
   import {
     createDefaultEngineHooks,
     effectiveProcessorState,
@@ -316,8 +316,10 @@
 
     const controller = new AbortController();
     const timer = setTimeout(() => {
+      // The output is sRGB; a wide-gamut original must be gamut-mapped to the
+      // same space or SSIM compares different coordinates, not visual colours.
       void metricsClient
-        .measure(original, output, controller.signal)
+        .measure(toSrgb(original), output, controller.signal)
         .then((result) => {
           if (controller.signal.aborted) return;
           metrics = { ssim: result.ssim, ms: result.ms };
@@ -386,6 +388,10 @@
         bridge(),
         probeHooks,
         pipeline.registry,
+        undefined,
+        // No browser fallback in a probe: a silent codec swap would measure the
+        // wrong encoder and poison the auto-suggest binary search.
+        false,
       );
       const data = await runDecodeOutput(scope, encoded, bridge(), probeHooks);
       probeReference = processed;
@@ -396,7 +402,8 @@
     measure: (data, _quality, signal) => {
       const reference = probeReference ?? st.sides[0].data;
       if (!reference) return Promise.resolve(null);
-      return metricsClient.measure(reference, data, signal);
+      // `data` is the sRGB decode of the probe output; match the reference to it.
+      return metricsClient.measure(toSrgb(reference), data, signal);
     },
     encoderLabel: () => encoderLabelFor(st.sides[1].latestSettings.encoderId),
     originalBytes: () => st.source?.file.size ?? 0,

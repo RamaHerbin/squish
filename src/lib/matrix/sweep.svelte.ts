@@ -70,6 +70,7 @@ import {
   type WorkerBridgeApi,
   type WorkerEncoderId,
 } from '../contracts';
+import { toSrgb } from '../codecs';
 import { ENCODER_ACCENT, accentFill } from '../ui/types';
 import type { AccentName } from '../ui/types';
 
@@ -712,12 +713,17 @@ export function createMatrixSweep(options: MatrixSweepOptions): MatrixSweepStore
   }
 
   async function run(
-    source: ImageData,
+    rawSource: ImageData,
     bytes: number,
     runOptions: MatrixRunOptions = {},
   ): Promise<void> {
     if (disposed) return;
     cancel();
+
+    // The wasm codecs assume unprofiled sRGB. Gamut-map a wide-gamut source down
+    // once, up front, so every cell encodes and is measured in the same space
+    // the editor's recommendation will actually produce. No-op for sRGB.
+    const source = toSrgb(rawSource);
 
     originalBytes = Math.max(0, Math.round(bytes));
     measuring = runOptions.measure ?? options.measure ?? metrics !== undefined;

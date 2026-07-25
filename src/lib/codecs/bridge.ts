@@ -328,10 +328,15 @@ class CodecWorkerBridge implements WorkerBridgeApi {
 
   preload(id: WorkerEncoderId): void {
     const controller = new AbortController();
-    // Warm-up is advisory and can be legitimately slow — no watchdog.
-    void this.run(controller.signal, (api) => api.preload(id), Infinity).catch(() => {
-      // A failure here is not the user's problem.
-    });
+    // Warm-up is advisory, but it still rides the serial queue: an Infinity
+    // budget on a deadlocked wasm `init()` would block every queued encode
+    // behind it, so its own watchdog could never start. Give preload the same
+    // no-pixel watchdog so a wedged init terminates and the queue drains.
+    void this.run(controller.signal, (api) => api.preload(id), this.watchdogBudget()).catch(
+      () => {
+        // A failure here is not the user's problem.
+      },
+    );
   }
 }
 

@@ -207,10 +207,20 @@ export interface ResultCacheEntry {
   /** Pixels decoded back from {@link ResultCacheEntry.file}, for the preview. */
   data: ImageData;
   file: File;
+  /**
+   * The browser encoder that produced {@link ResultCacheEntry.file} when the
+   * wasm worker had failed, mirroring {@link SideOutput.encoderFallback}. Cached
+   * so a later hit re-labels the degraded output instead of presenting it as the
+   * selected wasm codec's result.
+   */
+  encoderFallback?: BrowserEncoderId;
 }
 
 /** What a cache hit hands back — the produced artefacts only. */
-export type ResultCacheHit = Pick<ResultCacheEntry, 'processed' | 'data' | 'file'>;
+export type ResultCacheHit = Pick<
+  ResultCacheEntry,
+  'processed' | 'data' | 'file' | 'encoderFallback'
+>;
 
 /**
  * Small LRU keyed on (preprocessed identity, processor state, encoder + options).

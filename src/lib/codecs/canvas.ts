@@ -99,6 +99,32 @@ export function drawDataToCanvas(canvas: AnyCanvas, data: ImageData): void {
   ctx.putImageData(data, 0, 0);
 }
 
+/**
+ * Gamut-map pixels down to sRGB, letting the browser clip out-of-gamut colours.
+ * A no-op when the data is already sRGB (the common case), so nothing
+ * round-trips that path. Used wherever wide-gamut pixels meet something that
+ * assumes unprofiled sRGB: the 8-bit encoders, and SSIM measurement.
+ */
+export function toSrgb(data: ImageData): ImageData {
+  if (colorSpaceOf(data) === 'srgb') return data;
+  const source = createCanvas(data.width, data.height);
+  drawDataToCanvas(source, data);
+  const dest = createCanvas(data.width, data.height);
+  const ctx = context2d(dest, 'srgb');
+  ctx.drawImage(
+    source as CanvasImageSource,
+    0,
+    0,
+    data.width,
+    data.height,
+    0,
+    0,
+    data.width,
+    data.height,
+  );
+  return ctx.getImageData(0, 0, data.width, data.height, { colorSpace: 'srgb' });
+}
+
 /* -------------------------------------------------------------------------- */
 /* Encoding                                                                    */
 /* -------------------------------------------------------------------------- */

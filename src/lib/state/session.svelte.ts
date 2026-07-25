@@ -586,6 +586,9 @@ export class JobSession implements JobEngine {
 
         if (hit) {
           ({ file, data, processed } = hit);
+          // A cached browser-fallback result must stay labelled as one, or the
+          // UI would present it as the selected wasm codec's output.
+          usedFallback = hit.encoderFallback;
         } else {
           const previous = this.#sideProcessed[side];
           if (work.processing || !previous) {
@@ -633,6 +636,7 @@ export class JobSession implements JobEngine {
             processed,
             data,
             file,
+            encoderFallback: usedFallback,
           });
         }
       }

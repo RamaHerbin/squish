@@ -61,6 +61,7 @@ import type {
   WorkerBridgeApi,
   WorkerResizeOptions,
 } from '../contracts';
+import { toSrgb } from '../codecs/canvas';
 
 /* -------------------------------------------------------------------------- */
 /* Errors                                                                      */
@@ -477,22 +478,6 @@ async function encodeBytes(
 }
 
 /**
- * Gamut-map wide-gamut pixels down to sRGB before the 8-bit encoders (wasm and
- * canvas) see them — they carry no colour profile and treat bytes as sRGB, so a
- * `display-p3` buffer would otherwise be written to file as mislabelled sRGB.
- * The browser does the P3 → sRGB conversion (out-of-gamut colours clip). A no-op
- * for the common sRGB source, so nothing round-trips that path.
- */
-function toSrgb(data: ImageData): ImageData {
-  if ((data.colorSpace ?? 'srgb') === 'srgb') return data;
-  const src = createCanvasContext(data.width, data.height, data.colorSpace);
-  src.putImageData(data, 0, 0);
-  const dest = createCanvasContext(data.width, data.height, 'srgb');
-  dest.drawImage(src.canvas as unknown as CanvasImageSource, 0, 0);
-  return dest.getImageData(0, 0, data.width, data.height, { colorSpace: 'srgb' });
-}
-
-/**
  * The canvas encoder to fall back to when a wasm codec worker fails outright —
  * never loaded, or wedged past the bridge watchdog. Only the three formats the
  * browser can natively encode have an equivalent; `avif`/`jxl`/`qoi` have none,
@@ -515,7 +500,13 @@ function browserFallbackFor(
             quality: settings.encoderOptions.quality / 100,
           }),
       };
-    case 'webp':
+    case 'webp': {
+      // The canvas API only encodes lossy WebP. A lossless/near-lossless request
+      // has no browser equivalent, so surface the worker error rather than
+      // silently shipping a lossy file under a lossless label.
+      if (settings.encoderOptions.lossless === 1 || settings.encoderOptions.near_lossless < 100) {
+        return undefined;
+      }
       return {
         id: 'browser-webp',
         encode: (signal, image) =>
@@ -523,6 +514,7 @@ function browserFallbackFor(
             quality: settings.encoderOptions.quality / 100,
           }),
       };
+    }
     case 'oxipng':
       return {
         id: 'browser-png',
@@ -542,6 +534,10 @@ function browserFallbackFor(
  * canvas equivalent, this retries once on the browser encoder and reports which
  * one via `onFallback` so the UI can flag the degraded output. avif/jxl/qoi
  * have no browser encoder, so the worker error propagates.
+ *
+ * `allowFallback` must be `false` for probe encodes (auto-suggest, matrix): a
+ * silent codec swap mid-search measures the wrong encoder and poisons the
+ * binary search, so those callers want the raw worker failure instead.
  */
 export async function runEncode(
   signal: AbortSignal,
@@ -552,6 +548,7 @@ export async function runEncode(
   hooks: EngineHooks,
   registry?: EncoderRegistry,
   onFallback?: (id: BrowserEncoderId) => void,
+  allowFallback = true,
 ): Promise<File> {
   assertSignal(signal);
   if (settings.encoderId === 'identity') return sourceFile;
@@ -565,7 +562,8 @@ export async function runEncode(
   } catch (error) {
     // The worker sends pixels by structured clone, not transfer, so `srgb` is
     // still intact here and safe to re-encode on the canvas.
-    const fallback = isWorkerFailure(error) ? browserFallbackFor(settings, hooks) : undefined;
+    const fallback =
+      allowFallback && isWorkerFailure(error) ? browserFallbackFor(settings, hooks) : undefined;
     if (!fallback) throw error;
     bytes = await abortable(signal, fallback.encode(signal, srgb));
     onFallback?.(fallback.id);
