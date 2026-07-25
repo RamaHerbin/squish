@@ -1,0 +1,78 @@
+name: Bug report
+description: Something in Pinch doesn't work the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Pinch runs entirely in
+        your browser, so browser/OS details and console output are usually
+        the fastest way to a fix.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug. What did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The exact steps, in order, that trigger the bug.
+      placeholder: |
+        1. Open Pinch
+        2. Drop a ... file
+        3. Select ... encoder, set quality to ...
+        4. ...
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser + version
+      placeholder: "e.g. Chrome 129, Safari 18.1, Firefox 131"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "e.g. macOS 15, Windows 11, iOS 18, Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: input
+    id: format
+    attributes:
+      label: Image format(s) involved
+      description: Input format, and the encoder/output format if relevant.
+      placeholder: "e.g. HEIC input → AVIF output"
+
+  - type: input
+    id: filesize
+    attributes:
+      label: File size (and count, if a batch)
+      placeholder: "e.g. one 22 MB JPEG, or a batch of ~300 files"
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console errors
+      description: >
+        Open DevTools (F12 or Cmd+Opt+I), reproduce the bug, and paste
+        anything printed in the Console tab. If the bug is a wasm crash or
+        hang, also check the Network tab for a failed codec/wasm request.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: >
+        Screenshots, a sample file you can share, whether it happens every
+        time or intermittently, anything that seems relevant.

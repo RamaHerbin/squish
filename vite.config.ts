@@ -100,16 +100,23 @@ export default defineConfig({
         theme_color: '#141414',
         categories: ['photo', 'productivity', 'utilities'],
         icons: [
-          // SVG-only for now — crisp at every size and broadly supported by
-          // 2026. TODO(follow-up): rasterize public/icons/icon.svg and
-          // icon-maskable.svg to PNG at 192/512 (e.g. via
-          // @vite-pwa/assets-generator) and list them here too, for the
-          // install surfaces that still fall back to PNG.
+          // SVG first — crisp at every size, and the surfaces that understand
+          // it stop here. The PNGs below are rasterised from these exact two
+          // files by `scripts/generate-assets.mjs`, for the install surfaces
+          // that still ignore SVG icons.
           { src: '/icons/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
           {
             src: '/icons/icon-maskable.svg',
             sizes: 'any',
             type: 'image/svg+xml',
+            purpose: 'maskable',
+          },
+          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          {
+            src: '/icons/icon-maskable-512.png',
+            sizes: '512x512',
+            type: 'image/png',
             purpose: 'maskable',
           },
         ],

@@ -272,7 +272,11 @@
     openInEditor(files);
   }
 
-  /** ⌘K / Ctrl+K opens the picker — the shortcut the home bar advertises. */
+  /**
+   * ⌘K / Ctrl+K opens the file picker. Not advertised anywhere in the UI (no
+   * command palette exists to attach the chip to) — kept as an unlisted
+   * power-user shortcut only.
+   */
   function onWindowKeydown(event: KeyboardEvent): void {
     if (event.key !== 'k' && event.key !== 'K') return;
     if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
@@ -438,15 +442,14 @@
         <button type="button" class="home-link" onclick={() => openSettings('encoders')}>
           Formats
         </button>
-        <button type="button" class="home-link" onclick={() => openSettings('about')}>Source</button>
-        <button
-          type="button"
-          class="home-key"
-          aria-label="Open images (Command K)"
-          onclick={() => filePicker?.click()}
+        <a
+          class="home-link"
+          href="https://github.com/RamaHerbin/squish"
+          target="_blank"
+          rel="noopener noreferrer"
         >
-          ⌘K
-        </button>
+          Source
+        </a>
       </nav>
     </div>
   {/if}
@@ -608,8 +611,7 @@
     gap: 28px;
   }
 
-  .home-link,
-  .home-key {
+  .home-link {
     background: none;
     border: 0;
     padding: 0;
@@ -619,23 +621,13 @@
     text-transform: uppercase;
     color: var(--muted);
     white-space: nowrap;
+    text-decoration: none;
     cursor: pointer;
     transition: color var(--duration-fast) var(--ease-standard);
   }
 
   .home-link:hover {
     color: var(--ink);
-  }
-
-  .home-key {
-    padding: 5px 9px;
-    border: var(--border-width-ink) solid var(--hairline);
-    color: var(--ink);
-    text-transform: none;
-  }
-
-  .home-key:hover {
-    border-color: var(--ink);
   }
 
   /* -------------------------------------------------------------------- */
