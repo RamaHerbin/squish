@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
@@ -73,7 +74,7 @@ export default defineConfig({
         // Shell only: JS/CSS/HTML/icons/manifest. Codec wasm is
         // deliberately excluded (see sw.ts) and runtime-cached instead —
         // it's large and only some codecs get used per session.
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
+        globPatterns: ['**/*.{js,css,html,ico,png,jpg,jpeg,svg,webmanifest}'],
         // Codec-sized JS stays out of the shell precache — sw.ts runtime-caches
         // it in the wasm tier on first HEIC decode instead.
         globIgnores: ['**/heic-decode-*.js'],
@@ -100,16 +101,23 @@ export default defineConfig({
         theme_color: '#141414',
         categories: ['photo', 'productivity', 'utilities'],
         icons: [
-          // SVG-only for now — crisp at every size and broadly supported by
-          // 2026. TODO(follow-up): rasterize public/icons/icon.svg and
-          // icon-maskable.svg to PNG at 192/512 (e.g. via
-          // @vite-pwa/assets-generator) and list them here too, for the
-          // install surfaces that still fall back to PNG.
+          // SVG first — crisp at every size, and the surfaces that understand
+          // it stop here. The PNGs below are rasterised from these exact two
+          // files by `scripts/generate-assets.mjs`, for the install surfaces
+          // that still ignore SVG icons.
           { src: '/icons/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
           {
             src: '/icons/icon-maskable.svg',
             sizes: 'any',
             type: 'image/svg+xml',
+            purpose: 'maskable',
+          },
+          { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          {
+            src: '/icons/icon-maskable-512.png',
+            sizes: '512x512',
+            type: 'image/png',
             purpose: 'maskable',
           },
         ],
@@ -144,5 +152,11 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
+  },
+  test: {
+    // Default include, minus anything the agent harness drops into .claude/
+    // (a stray worktree there once doubled the whole suite) and the Tauri
+    // crate's target directory.
+    exclude: ['**/node_modules/**', '**/dist/**', '**/.claude/**', '**/src-tauri/**'],
   },
 });

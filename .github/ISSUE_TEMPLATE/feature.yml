@@ -1,0 +1,42 @@
+name: Feature request
+description: Suggest something Pinch doesn't do yet.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. The more concrete the use case, the easier
+        it is to evaluate whether — and how — it fits.
+
+  - type: textarea
+    id: usecase
+    attributes:
+      label: What are you trying to do?
+      description: >
+        Describe the actual task or workflow, not just the feature. What are
+        you compressing, how many images, for what purpose, and where does
+        Pinch currently fall short?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Pinch to do?
+      description: Your proposed feature or change, as concretely as you can.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds you've tried
+      description: >
+        Anything you're doing today to get around the gap (another tool, a
+        manual step, a combination of existing Pinch features).
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Mockups, links to prior art, related issues, etc.

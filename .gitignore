@@ -4,3 +4,4 @@ dist
 *.local
 coverage
 design-ref
+launch-kit
