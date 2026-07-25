@@ -1,0 +1,39 @@
+[package]
+name = "pinch"
+version = "0.1.0"
+description = "Pinch, client-side image compression"
+authors = ["Rama Herbin"]
+license = "MIT"
+repository = "https://github.com/RamaHerbin/squish"
+edition = "2021"
+rust-version = "1.82"
+
+# The binary is a two-line shim around this library so the same `run()` can be
+# reused if a mobile target is ever added. `pinch_lib` rather than `pinch`
+# because a bin and a lib of the same name collide on some linkers.
+[lib]
+name = "pinch_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+# `macos-private-api` deliberately left off: it forces the app onto private
+# AppKit calls that the App Store rejects, and Pinch needs none of it.
+tauri = { version = "2.11.5", features = [] }
+tauri-plugin-dialog = "2.7.2"
+tauri-plugin-fs = "2.5.1"
+tauri-plugin-opener = "2.5.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2.4.3"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

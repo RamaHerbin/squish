@@ -1,0 +1,117 @@
+name: macOS
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# A tag is immutable and a release build is expensive, so a run that is already
+# going must never be cancelled. Runs on the same ref queue behind each other
+# instead. The group name is distinct from ci.yml's so the two never collide.
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: false
+
+# Read-only by default. The single job below opts into contents: write for its
+# release step. Job-level permissions replace these rather than merge with them.
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    name: universal .app and .dmg
+    runs-on: macos-14
+    # Two architectures, lto = true and codegen-units = 1 make a cold build slow.
+    # This is a ceiling, not an expectation; a warm cargo cache lands well under it.
+    timeout-minutes: 90
+    permissions:
+      # Needed only by the softprops/action-gh-release step at the end of this
+      # job. Nothing else here writes to the repository.
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # macos-14 is an Apple silicon runner, so aarch64-apple-darwin is already
+      # the host target. x86_64-apple-darwin is the slice that has to be added
+      # before tauri can lipo the two into a universal binary. Both are listed
+      # explicitly so the job does not depend on which one the runner ships.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      # Must come after the toolchain step: the cache key includes the resolved
+      # rustc version. `workspaces: src-tauri` expands to src-tauri -> target,
+      # which is where Cargo.toml and Cargo.lock live.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install
+        run: npm ci
+
+      # `beforeBuildCommand` in tauri.conf.json is `npm run build`, so the Vite
+      # frontend is produced inside this step and no separate build step is needed.
+      # `universal-apple-darwin` is the one --target value that is not a rustc
+      # triple; the CLI accepts it specifically to build both slices and merge them.
+      #
+      # Code signing and notarization are intentionally absent. The .app and the
+      # .dmg that come out of here are unsigned, so Gatekeeper will make the user
+      # confirm on first launch. Turning signing on later needs no config change,
+      # only these repository secrets exposed as `env:` on this step:
+      #
+      #   APPLE_CERTIFICATE           base64 of the Developer ID Application .p12
+      #   APPLE_CERTIFICATE_PASSWORD  password protecting that .p12
+      #   APPLE_SIGNING_IDENTITY      "Developer ID Application: Name (TEAMID)"
+      #   APPLE_PROVIDER_SHORT_NAME   only if the Apple ID belongs to several teams
+      #
+      # Notarization then needs one of these two sets on top of the three above:
+      #
+      #   APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
+      #     APPLE_PASSWORD is an app-specific password, not the account password.
+      #
+      #   APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_KEY_PATH
+      #     App Store Connect API key, the better option for CI.
+      #
+      # The Tauri updater is not enabled, so TAURI_SIGNING_PRIVATE_KEY and
+      # TAURI_SIGNING_PRIVATE_KEY_PASSWORD are not needed and are absent too.
+      #
+      # The DMG step reads CI, which Actions always sets, and passes
+      # --skip-jenkins to create-dmg. That skips only the AppleScript that
+      # arranges the disk image window, which cannot run on a headless runner.
+      # The .dmg itself is still produced.
+      - name: Build universal macOS bundle
+        run: npm run tauri:build -- --target universal-apple-darwin
+
+      # Cheap, and it makes the first run of this workflow debuggable without a
+      # rerun if the bundler ever changes its output layout.
+      - name: List bundle output
+        run: ls -lR src-tauri/target/universal-apple-darwin/release/bundle
+
+      # The bundler names this Pinch_<version>_universal.dmg. Globbing avoids
+      # having to keep the version in sync with tauri.conf.json here.
+      - name: Upload .dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pinch-macos-universal-dmg
+          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+      # Draft, so a human reviews the notes and the download before anything is
+      # public. The tag itself supplies the release name.
+      - name: Attach .dmg to a draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg

@@ -77,7 +77,15 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,jpg,jpeg,svg,webmanifest}'],
         // Codec-sized JS stays out of the shell precache — sw.ts runtime-caches
         // it in the wasm tier on first HEIC decode instead.
-        globIgnores: ['**/heic-decode-*.js'],
+        globIgnores: [
+          '**/heic-decode-*.js',
+          // Tauri-only chunks: reachable solely behind the isTauri() dynamic
+          // import, dead weight for every web visitor's precache.
+          '**/tauri-*.js',
+          '**/core-*.js',
+          '**/event-*.js',
+          '**/dist-js-*.js',
+        ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
       // We register manually via `virtual:pwa-register/svelte` in
@@ -135,6 +143,16 @@ export default defineConfig({
       },
     }),
   ],
+  // `src-tauri/tauri.conf.json` hardcodes `devUrl: http://localhost:5173`, and
+  // Tauri waits for exactly that URL before opening the window. Vite's default
+  // is already 5173, but it silently walks to 5174 when the port is taken —
+  // which would leave `npm run tauri:dev` hanging on an empty window. Failing
+  // loudly on a busy port is the better outcome. No effect on `npm run dev`
+  // beyond that: same port, same everything.
+  server: {
+    port: 5173,
+    strictPort: true,
+  },
   worker: {
     format: 'es',
   },

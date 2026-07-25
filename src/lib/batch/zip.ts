@@ -24,6 +24,7 @@ import {
   type ZipExport,
   type ZipExportOptions,
 } from '../contracts';
+import { saveBlob } from '../platform';
 import { basename, dirname, sanitizeZipPath } from './files';
 
 /**
@@ -171,20 +172,18 @@ async function pumpInto(
 /* Download                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** Save a blob to disk via a throwaway object URL. */
+/**
+ * Save a blob to disk.
+ *
+ * Fire-and-forget, kept synchronous for its callers: on the web `saveBlob` is
+ * the same throwaway-object-URL anchor this function used to inline, and it
+ * does not await anything before clicking, so the download still happens inside
+ * the user's gesture. Under Tauri it opens a native save panel instead, and the
+ * outcome is not reported here — use {@link downloadZip} when the result
+ * matters.
+ */
 export function downloadBlob(blob: Blob, filename: string): void {
-  if (typeof document === 'undefined') return;
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.rel = 'noopener';
-  anchor.style.display = 'none';
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  // Revoking immediately races the download in Safari.
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  void saveBlob(filename, blob);
 }
 
 /** Build the archive and save it as `squished.zip`. */
@@ -193,7 +192,7 @@ export async function downloadZip(
   options?: ZipExportOptions & { filename?: string },
 ): Promise<void> {
   const blob = await exportZip(items, options);
-  downloadBlob(blob, options?.filename ?? BATCH_ZIP_FILENAME);
+  await saveBlob(options?.filename ?? BATCH_ZIP_FILENAME, blob);
 }
 
 /* -------------------------------------------------------------------------- */

@@ -8,10 +8,14 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^26.1.1",
     "jsdom": "^29.1.1",
     "playwright-core": "^1.62.0",
@@ -33,6 +37,10 @@
     "@jsquash/qoi": "^1.1.0",
     "@jsquash/resize": "^2.1.1",
     "@jsquash/webp": "^1.5.0",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tauri-apps/plugin-fs": "^2.5.1",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "comlink": "^4.4.2",
     "fflate": "^0.8.3",
     "heic-decode": "^2.1.0",

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Pinch",
+  "version": "0.1.0",
+  "identifier": "com.ramaherbin.pinch",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Pinch",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "focus": true,
+        "dragDropEnabled": false,
+        "backgroundColor": "#FBF7EB"
+      }
+    ],
+    "security": {
+      "csp": null,
+      "headers": {
+        "Cross-Origin-Opener-Policy": "same-origin",
+        "Cross-Origin-Embedder-Policy": "require-corp"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "category": "Photography",
+    "shortDescription": "Client-side image compression",
+    "longDescription": "Pinch compresses images to AVIF, JPEG XL, WebP and more, entirely on your machine. Nothing is uploaded.",
+    "copyright": "Copyright (c) 2026 Rama Herbin",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    },
+    "fileAssociations": [
+      {
+        "name": "Image",
+        "description": "Image",
+        "role": "Viewer",
+        "ext": [
+          "heic",
+          "heif",
+          "png",
+          "jpg",
+          "jpeg",
+          "webp",
+          "avif",
+          "jxl",
+          "qoi",
+          "svg",
+          "gif"
+        ]
+      }
+    ]
+  }
+}
