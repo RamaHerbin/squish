@@ -327,10 +327,22 @@
 
           {#if !isCompact}
             <div class="drop-actions">
-              <PillButton variant="solid" size={38} font="body" onclick={onChooseClick}>
+              <PillButton
+                variant="solid"
+                size={38}
+                font="body"
+                flair="var(--cream)"
+                onclick={onChooseClick}
+              >
                 Choose files
               </PillButton>
-              <PillButton variant="outline" size={38} font="body" onclick={pasteFromClipboard}>
+              <PillButton
+                variant="outline"
+                size={38}
+                font="body"
+                flair="ink"
+                onclick={pasteFromClipboard}
+              >
                 Paste
                 {#snippet trailing()}<span aria-hidden="true">↗</span>{/snippet}
               </PillButton>

@@ -97,9 +97,9 @@
   }
 
   /* ── Cursor flair (cursorFlair action) ─────────────────────────────
-     The action injects .flair/.flair__blob outside Svelte's scope, hence
-     the :global selectors. The blob lives under the content; every other
-     child is lifted above it. */
+     The blob itself is styled globally in app.css because the action injects
+     it outside Svelte's scope. Here we only clip it to the card and lift the
+     content above it. */
   .item {
     position: relative;
     overflow: hidden;
@@ -108,31 +108,6 @@
   .item > :global(:not(.flair)) {
     position: relative;
     z-index: 1;
-  }
-
-  .item :global(.flair) {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    will-change: transform;
-  }
-
-  .item :global(.flair__blob) {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 150%;
-    aspect-ratio: 1;
-    border-radius: 50%;
-    transform: translate(-50%, -50%) scale(0);
-    transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
-    will-change: transform;
-  }
-
-  .item :global(.flair__blob.is-in) {
-    transform: translate(-50%, -50%) scale(1);
-    transition-duration: 400ms;
   }
 
   /* The active card is a solid blue fill; no blob on top of it. */
