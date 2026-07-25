@@ -8,7 +8,7 @@
  * Dependency-free: types and tiny pure helpers only.
  */
 
-import { isEncoderId } from './codecs';
+import { DEFAULT_ENCODER_OPTIONS, isEncoderId } from './codecs';
 import type { SideSettings } from './processing';
 
 /** Bump only on a breaking shape change; readers reject unknown versions. */
@@ -112,8 +112,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Structural check for {@link SideSettings} parsed from untrusted input. */
-export function isSideSettings(value: unknown): value is SideSettings {
+/**
+ * Encoder options are fed straight to wasm, so untrusted input must match the
+ * selected encoder's default option shape exactly: no unknown keys, no type
+ * changes, no non-finite numbers. Missing keys are fine — appliers merge over
+ * defaults.
+ */
+function matchesEncoderOptionShape(
+  options: Record<string, unknown>,
+  defaults: Record<string, unknown>,
+): boolean {
+  for (const [key, incoming] of Object.entries(options)) {
+    if (!(key in defaults)) return false;
+    const expected = defaults[key];
+    if (typeof incoming !== typeof expected) return false;
+    if (typeof incoming === 'number' && !Number.isFinite(incoming)) return false;
+  }
+  return true;
+}
+
+/**
+ * Loose structural check: the record is recognisably a {@link SideSettings}.
+ * Use this before a *sanitizing rebuild* (settings persistence) — it accepts
+ * junk keys and wrong-typed option values that the rebuild will drop.
+ */
+export function isSideSettingsShape(value: unknown): value is SideSettings {
   if (!isRecord(value)) return false;
   if (!isEncoderId(value['encoderId'])) return false;
   if (!isRecord(value['encoderOptions'])) return false;
@@ -128,6 +151,18 @@ export function isSideSettings(value: unknown): value is SideSettings {
   if (typeof resize['method'] !== 'string') return false;
 
   return true;
+}
+
+/**
+ * Strict check for {@link SideSettings} from *untrusted* input (shared URLs,
+ * imported JSON): structure plus per-encoder option shape — options go
+ * straight to wasm, so unknown keys, type changes and non-finite numbers are
+ * all rejected rather than sanitized.
+ */
+export function isSideSettings(value: unknown): value is SideSettings {
+  if (!isSideSettingsShape(value)) return false;
+  const defaults = DEFAULT_ENCODER_OPTIONS[value.encoderId] as Record<string, unknown>;
+  return matchesEncoderOptionShape(value.encoderOptions as Record<string, unknown>, defaults);
 }
 
 /**

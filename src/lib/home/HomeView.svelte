@@ -15,7 +15,7 @@
   import { onMount } from 'svelte';
 
   import { accentFill, Chip, PillButton, Ticker, type AccentName } from '$lib/ui';
-  import { EXTENSION_BY_MIME, type ImageMimeType } from '$lib/contracts';
+  import { EXTENSION_BY_MIME, FILE_PICKER_ACCEPT, type ImageMimeType } from '$lib/contracts';
   import { formatBytes } from '$lib/batch/format';
 
   /** Below this width the layout stacks per comp section "06a Mobile home". */
@@ -332,7 +332,7 @@
       <input
         bind:this={fileInput}
         type="file"
-        accept="image/*,.heic,.heif"
+        accept={FILE_PICKER_ACCEPT}
         multiple
         class="sr-only"
         tabindex="-1"

@@ -124,6 +124,15 @@ describe('computeSsim', () => {
     expect(computeSsim(solid(4, 4, 120), solid(4, 4, 20))).toBeLessThan(1);
   });
 
+  it('sees through alpha: transparent vs opaque with identical RGB differ', () => {
+    // A transparent source encoded to JPEG keeps its hidden RGB but renders as
+    // the page background — alpha must participate or this scores 1.
+    const transparent = image(16, 16, (x) => [40, 40, 40, x < 8 ? 0 : 255]);
+    const opaque = image(16, 16, () => [40, 40, 40, 255]);
+    expect(computeSsim(transparent, opaque)).toBeLessThan(0.9);
+    expect(computeSsim(transparent, transparent)).toBe(1);
+  });
+
   it('scores pure noise against a flat field very low', () => {
     const score = computeSsim(solid(32, 32, 128), noise(32, 32, 3));
     expect(score).toBeLessThan(0.2);
@@ -154,10 +163,11 @@ describe('computeSsim', () => {
     expect(() => computeSsim(broken, broken)).toThrow(RangeError);
   });
 
-  it('ignores alpha', () => {
+  it('composites alpha over white before comparing', () => {
     const opaque = image(16, 16, (x) => [x * 8, x * 8, x * 8, 255]);
     const transparent = image(16, 16, (x) => [x * 8, x * 8, x * 8, 0]);
-    expect(computeSsim(opaque, transparent)).toBe(1);
+    expect(computeSsim(opaque, transparent)).toBeLessThan(1);
+    expect(computeSsim(transparent, transparent)).toBe(1);
   });
 });
 

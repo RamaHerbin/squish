@@ -167,6 +167,33 @@ export interface VectorSource {
   svgText: string;
 }
 
+/**
+ * `accept` value for every file picker. `image/*` alone is not enough: systems
+ * that never registered QOI/JXL/HEIC MIME types would grey those files out, so
+ * every supported extension is listed explicitly alongside it.
+ */
+export const FILE_PICKER_ACCEPT: string = [
+  'image/*',
+  ...new Set([
+    ...Object.values(EXTENSION_BY_MIME).map((ext) => `.${ext}`),
+    ...Object.keys(MIME_BY_EXTENSION).map((ext) => `.${ext}`),
+  ]),
+].join(',');
+
+/** The per-file ceiling the UI advertises ("MAX 50 MB / FILE"). */
+export const MAX_FILE_BYTES = 50 * 1024 * 1024;
+
+/** Split files into those within {@link MAX_FILE_BYTES} and those over it. */
+export function partitionBySize(files: readonly File[]): {
+  accepted: File[];
+  oversized: File[];
+} {
+  const accepted: File[] = [];
+  const oversized: File[] = [];
+  for (const file of files) (file.size > MAX_FILE_BYTES ? oversized : accepted).push(file);
+  return { accepted, oversized };
+}
+
 /** How a source file signalled HDR. Pixels are tone-mapped to SDR at decode. */
 export type HdrKind = 'pq' | 'hlg' | 'gainmap';
 

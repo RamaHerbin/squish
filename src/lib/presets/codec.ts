@@ -64,11 +64,17 @@ export class PresetDecodeError extends Error {
  */
 export const MAX_PRESET_TOKEN_BYTES = 2048;
 
+/** Ceiling for the decompressed JSON — far above any real preset. */
+export const MAX_PRESET_JSON_BYTES = 64 * 1024;
+
 /* -------------------------------------------------------------------------- */
 /* Stream plumbing                                                             */
 /* -------------------------------------------------------------------------- */
 
-async function readAllChunks(readable: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+async function readAllChunks(
+  readable: ReadableStream<Uint8Array>,
+  maxBytes = Infinity,
+): Promise<Uint8Array> {
   const reader = readable.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -78,6 +84,10 @@ async function readAllChunks(readable: ReadableStream<Uint8Array>): Promise<Uint
     if (value && value.length > 0) {
       chunks.push(value);
       total += value.length;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error(`Decompressed payload exceeds ${maxBytes} bytes`);
+      }
     }
   }
   const out = new Uint8Array(total);
@@ -100,11 +110,15 @@ async function compressBytes(bytes: Uint8Array): Promise<Uint8Array> {
   return result;
 }
 
-async function decompressBytes(bytes: Uint8Array): Promise<Uint8Array> {
+async function decompressBytes(bytes: Uint8Array, maxBytes = Infinity): Promise<Uint8Array> {
   const stream = new DecompressionStream(PRESET_URL_COMPRESSION_FORMAT);
   const writer = stream.writable.getWriter();
   const writeDone = writer.write(new Uint8Array(bytes)).then(() => writer.close());
-  const [result] = await Promise.all([readAllChunks(stream.readable), writeDone]);
+  // A rejected reader cancels the pipeline; silence the now-pointless write.
+  const [result] = await Promise.all([
+    readAllChunks(stream.readable, maxBytes),
+    writeDone.catch(() => undefined),
+  ]);
   return result;
 }
 
@@ -137,6 +151,15 @@ export async function encodePresetToken(preset: Preset): Promise<string> {
  *   parsed as JSON, or fails {@link isPreset}.
  */
 export async function decodePresetToken(token: string): Promise<Preset> {
+  // Attacker-controlled input: bound it before touching it. The encoded cap
+  // mirrors what encodePresetToken will ever produce; the decompressed cap
+  // stops a tiny, highly-compressible token from ballooning in memory.
+  if (token.length > MAX_PRESET_TOKEN_BYTES) {
+    throw new PresetDecodeError(
+      `Preset token is too large (${token.length} > ${MAX_PRESET_TOKEN_BYTES}).`,
+    );
+  }
+
   let compressed: Uint8Array;
   try {
     compressed = base64UrlToBytes(token);
@@ -146,7 +169,7 @@ export async function decodePresetToken(token: string): Promise<Preset> {
 
   let bytes: Uint8Array;
   try {
-    bytes = await decompressBytes(compressed);
+    bytes = await decompressBytes(compressed, MAX_PRESET_JSON_BYTES);
   } catch (cause) {
     throw new PresetDecodeError('Preset token failed to decompress.', { cause });
   }

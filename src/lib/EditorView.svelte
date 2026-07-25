@@ -406,8 +406,8 @@
   const autoSearchable = $derived(primaryKnob(st.sides[1].latestSettings).kind === 'quality');
 
   /**
-   * One suggestion per (file, encoder). Plain, not `$state`: it guards the
-   * effect below and must not retrigger it.
+   * One suggestion per (file, encoder, probe-input state). Plain, not
+   * `$state`: it guards the effect below and must not retrigger it.
    */
   let autoKey: string | undefined;
 
@@ -418,7 +418,17 @@
 
     if (!appSettings.current.autoSuggest || !autoSearchable || !ready || !file) return;
 
-    const key = `${file.name}:${file.size}:${encoderId}:${st.preprocessorState.rotate}`;
+    // Everything that changes the pixels the probe encodes must be in the
+    // key, or a stale suggestion survives a crop/resize change.
+    const key = [
+      file.name,
+      file.size,
+      file.lastModified,
+      encoderId,
+      st.preprocessorState.rotate,
+      JSON.stringify(st.preprocessorState.crop ?? null),
+      JSON.stringify(st.sides[1].latestSettings.processorState.resize),
+    ].join(':');
     if (key === autoKey) return;
     autoKey = key;
     auto.reset();
