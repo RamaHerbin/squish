@@ -28,7 +28,7 @@ npm run tauri:dev  # native window against the dev server
 npm run tauri:build
 
 node scripts/generate-assets.mjs [icons|og|demo|hdr|shots|macos]   # binary assets
-npm run release <major|minor|patch|x.y.z> [--dry-run]          # cut a version
+npm run release <major|minor|patch|x.y.z> [-- --dry-run]        # cut a version
 ```
 
 `npm run check` and `npm test` are the gate. Run both before claiming anything

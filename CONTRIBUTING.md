@@ -174,18 +174,25 @@ a literal.
 2. From a clean, up-to-date `main`:
 
    ```sh
-   npm run release minor          # major | minor | patch | an explicit x.y.z
-   npm run release minor --dry-run   # see what it would do first
+   npm run release minor             # major | minor | patch | an explicit x.y.z
+   npm run release minor -- --dry-run   # see what it would do first
    ```
+
+   Note the `--` before `--dry-run`: without it npm recognises the flag as one of
+   its own and swallows it. The script also reads npm's `npm_config_dry_run`, so
+   the shorter spelling is safe too, but `--` is the form to teach.
 
    It checks the preconditions, runs `check` and `test`, bumps `package.json`
    (and the lockfile) plus the Cargo crate, promotes `## [Unreleased]` to a
    dated heading with its link reference, then commits `chore(release): vX.Y.Z`
-   and creates an annotated tag carrying the notes.
-3. It stops there on purpose. Read the diff, then:
+   and creates an annotated tag carrying the notes. If anything fails part-way,
+   every file it had rewritten is restored.
+3. It stops there on purpose. Read the diff, then push `main` and the one tag —
+   an explicit refspec, because `--follow-tags` would also publish any other
+   stray local `v*` tag and start a second release build:
 
    ```sh
-   git push origin main --follow-tags
+   git push origin main vX.Y.Z
    ```
 4. The macOS workflow verifies the tag matches `package.json`, re-runs
    `check`/`test`, builds the universal DMG and opens a **draft** release.
