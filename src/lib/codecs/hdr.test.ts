@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
-import { detectHdr, hdrLabel } from './hdr';
+import { HDR_SCAN_BYTES, detectHdr, hdrLabel } from './hdr';
 
 function ascii(text: string): number[] {
   return [...text].map((c) => c.charCodeAt(0));
@@ -61,6 +64,19 @@ describe('detectHdr', () => {
   it('returns undefined on plain SDR files and tiny buffers', () => {
     expect(detectHdr(new Uint8Array([0x89, 0x50]), 'image/png')).toBeUndefined();
     expect(detectHdr(new Uint8Array(0), 'image/heic')).toBeUndefined();
+  });
+
+  /**
+   * The one case here that reads a real file. `public/demo/demo-hdr.avif` is a
+   * bundled sample whose entire reason to exist is to light this detector up on
+   * the home screen, and it is produced by a tool outside the npm tree
+   * (`node scripts/generate-assets.mjs hdr`, which shells out to avifenc). A
+   * synthetic fixture cannot notice that asset losing its PQ tag; this can.
+   */
+  it('detects the bundled HDR sample as PQ', () => {
+    const file = fileURLToPath(new URL('../../../public/demo/demo-hdr.avif', import.meta.url));
+    const head = readFileSync(file).subarray(0, HDR_SCAN_BYTES);
+    expect(detectHdr(new Uint8Array(head), 'image/avif')).toEqual({ kind: 'pq' });
   });
 });
 

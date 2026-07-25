@@ -44,6 +44,10 @@ markers (Ultra HDR JPEG, Apple HEIC), then labels the source `HDR (PQ)`, `HDR (H
 decoder ran. The output is honest SDR, and the interface says so instead of implying
 your highlights survived.
 
+The fourth sample on the home screen, `demo-hdr.avif`, is a real 10-bit PQ file (BT.2020
+primaries, a 950-nit highlight) if you want to see that path without digging a photo out
+of your phone.
+
 Proper HDR output would mean a 10-bit-or-higher pipeline, a colour-management story for
 the preview canvas, and gain-map muxing on export. That is a different application, not
 a flag.

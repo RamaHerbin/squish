@@ -74,7 +74,12 @@ export default defineConfig({
         // Shell only: JS/CSS/HTML/icons/manifest. Codec wasm is
         // deliberately excluded (see sw.ts) and runtime-cached instead —
         // it's large and only some codecs get used per session.
-        globPatterns: ['**/*.{js,css,html,ico,png,jpg,jpeg,svg,webmanifest}'],
+        //
+        // `avif` is here for one file, `public/demo/demo-hdr.avif`: the sample
+        // cards have to keep working with the network off like the rest of the
+        // shell, and without this extension the HDR card would be the only one
+        // that 404s offline.
+        globPatterns: ['**/*.{js,css,html,ico,png,jpg,jpeg,svg,avif,webmanifest}'],
         // Codec-sized JS stays out of the shell precache — sw.ts runtime-caches
         // it in the wasm tier on first HEIC decode instead.
         globIgnores: [
