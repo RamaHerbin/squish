@@ -16,6 +16,7 @@
 
   import { accentFill, Chip, PillButton, Ticker, type AccentName } from '$lib/ui';
   import {
+    APP_VERSION_TAG,
     EXTENSION_BY_MIME,
     FILE_PICKER_ACCEPT,
     mimeTypeFromFilename,
@@ -451,7 +452,7 @@
       {#if !isCompact}
         <span class="ticker-cta">Let's squash</span>
       {/if}
-      <span>v0.1.0</span>
+      <span>{APP_VERSION_TAG}</span>
     {/snippet}
   </Ticker>
 </div>
