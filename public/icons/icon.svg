@@ -1,0 +1,10 @@
+<!--
+  Pinch — Editorial brand mark: the BrandDot primitive, scaled up. Cream
+  paper background, 1.5px-ink-style border (scaled), one blue rounded square
+  with its own ink border, centered. Deliberately just that — no wordmark, no
+  gradient — so it stays crisp at every install-surface size.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Pinch">
+  <rect x="7" y="7" width="498" height="498" rx="108" fill="#FBF7EB" stroke="#141414" stroke-width="14"/>
+  <rect x="146" y="146" width="220" height="220" rx="46" fill="#1B6EF3" stroke="#141414" stroke-width="14"/>
+</svg>
