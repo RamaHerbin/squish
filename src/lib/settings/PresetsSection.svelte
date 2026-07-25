@@ -15,6 +15,7 @@
   import { PresetTooLargeError, buildPresetShareUrl, presetLibrary } from '../presets';
   import { BrandDot, PillButton, ENCODER_ACCENT } from '../ui';
   import { ENCODER_REGISTRY } from '../codecs';
+  import { saveBlob } from '../platform';
   import SectionHeader from './SectionHeader.svelte';
 
   let loaded = $state(false);
@@ -94,16 +95,18 @@
   let fileInput = $state<HTMLInputElement | undefined>(undefined);
   let importError = $state('');
 
+  // Routed through the platform seam like every other save in the app: the web
+  // branch is the same object-URL anchor this used to inline (click inside the
+  // gesture, revoke after 60s), the macOS branch is the native save panel,
+  // whose failures (full disk, revoked permission) surface in the import/export
+  // error line instead of vanishing as an unhandled rejection.
   function exportPresets(): void {
+    importError = '';
     const json = JSON.stringify(presetLibrary.presets, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = 'pinch-presets.json';
-    anchor.click();
-    // Revoking immediately races the download in Safari.
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    saveBlob('pinch-presets.json', blob).catch((error) => {
+      importError = `Export failed: ${error instanceof Error ? error.message : String(error)}`;
+    });
   }
 
   function triggerImport(): void {

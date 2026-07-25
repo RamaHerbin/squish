@@ -5,6 +5,7 @@
    * (padding, radii, badge treatment, colours) — relocated here since they
    * are "about the app", not a default to tune.
    */
+  import { openExternalLink } from '../platform';
   import { BrandDot } from '../ui';
   import SectionHeader from './SectionHeader.svelte';
 
@@ -31,12 +32,16 @@
       </p>
     </div>
 
+    <!-- `openExternalLink` does nothing on the web, so these stay ordinary
+         new-tab links. Under Tauri a plain anchor would navigate the app
+         window itself to GitHub, so it hands the URL to the system browser. -->
     <div class="links">
       <a
         class="link-card docs"
         href="https://github.com/RamaHerbin/squish#readme"
         target="_blank"
         rel="noopener noreferrer"
+        onclick={openExternalLink}
       >
         <span class="badge">DOCS</span>
         <span class="link-label">README</span>
@@ -48,6 +53,7 @@
         href="https://github.com/RamaHerbin/squish"
         target="_blank"
         rel="noopener noreferrer"
+        onclick={openExternalLink}
       >
         <span class="badge">GIT</span>
         <span class="link-label">github.com/RamaHerbin/squish</span>

@@ -16,15 +16,25 @@
  *   node scripts/generate-assets.mjs              # everything
  *   node scripts/generate-assets.mjs icons og     # a subset
  *
- * Targets: `icons` (+ favicon), `og`, `demo`, `shots`.
- * `shots` boots `vite` on a free port and drives the real app, so it is the
- * slow one; the other three are pure rendering and take a couple of seconds.
+ * Targets: `icons` (+ favicon), `macos` (the Tauri app icon), `og`, `demo`,
+ * `shots`. `shots` boots `vite` on a free port and drives the real app, so it
+ * is the slow one; the rest are pure rendering and take a couple of seconds.
+ *
+ * `macos` is opt-in and excluded from a bare, argument-less run: it shells
+ * out to `iconutil`, which only ships with macOS, so it must be named
+ * explicitly (`node scripts/generate-assets.mjs macos`) rather than breaking
+ * the default "everything" run for contributors on Linux or Windows.
  *
  * Outputs (all overwritten in place, all committed):
  *   public/icons/icon-192.png          192×192   from icon.svg
  *   public/icons/icon-512.png          512×512   from icon.svg
  *   public/icons/icon-maskable-512.png 512×512   from icon-maskable.svg
  *   public/favicon.ico                 32×32     PNG-in-ICO container
+ *   src-tauri/icons/icon.icns          7 sizes   from icon.svg, via iconutil
+ *   src-tauri/icons/icon.png           512×512   from icon.svg
+ *   src-tauri/icons/32x32.png          32×32     from icon.svg
+ *   src-tauri/icons/128x128.png        128×128   from icon.svg
+ *   src-tauri/icons/128x128@2x.png     256×256   from icon.svg
  *   public/og.png                      1200×630  social card
  *   public/demo/demo-sunset.jpg        1600×1200 synthetic photo, JPEG q0.8
  *   public/demo/demo-poster.png        1200×900  geometric poster, PNG
@@ -32,7 +42,7 @@
  *   docs/media/editor.png              1440×900  app screenshot
  */
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -247,6 +257,82 @@ async function buildIcons(browser) {
   const faviconFile = p('public/favicon.ico');
   await fs.writeFile(faviconFile, ico);
   record(faviconFile, ico, null, '32×32');
+}
+
+/* -------------------------------------------------------------------------- */
+/* 1b. macOS app icon (icon.icns + the Tauri PNG conventions)                 */
+/* -------------------------------------------------------------------------- */
+
+/** The seven renders `iconutil` wants, shared by the ten `.iconset` slots below. */
+const ICNS_SIZES = [16, 32, 64, 128, 256, 512, 1024];
+
+/**
+ * `iconutil`'s `.iconset` naming convention: five base sizes, each with a
+ * `@2x` slot filled by the next size up. That is ten filenames drawn from
+ * only seven distinct renders — 32, 256 and 512 each fill two slots, once as
+ * a native size and once as the retina slot for the size below it.
+ */
+const ICONSET_SLOTS = [
+  ['icon_16x16.png', 16],
+  ['icon_16x16@2x.png', 32],
+  ['icon_32x32.png', 32],
+  ['icon_32x32@2x.png', 64],
+  ['icon_128x128.png', 128],
+  ['icon_128x128@2x.png', 256],
+  ['icon_256x256.png', 256],
+  ['icon_256x256@2x.png', 512],
+  ['icon_512x512.png', 512],
+  ['icon_512x512@2x.png', 1024],
+];
+
+/** The flat PNGs Tauri's `bundle.icon` array names directly, alongside the .icns. */
+const TAURI_PNG_SLOTS = [
+  ['icon.png', 512],
+  ['32x32.png', 32],
+  ['128x128.png', 128],
+  ['128x128@2x.png', 256],
+];
+
+async function buildMacosIcons(browser) {
+  console.log('macos');
+  if (process.platform !== 'darwin') {
+    throw new Error(
+      'The macos target shells out to `iconutil`, which ships only with macOS. Run this on a Mac, or skip the target elsewhere: node scripts/generate-assets.mjs icons og demo shots',
+    );
+  }
+
+  const source = await fs.readFile(p('public/icons/icon.svg'), 'utf8');
+
+  // Render each distinct edge once and keep it keyed by size, so the ten
+  // .iconset filenames and four Tauri filenames reuse these seven rasterisations
+  // instead of asking Chrome to redraw a size it already drew.
+  const renders = new Map();
+  for (const size of ICNS_SIZES) {
+    const dataUrl = await renderSvg(browser, source, size);
+    renders.set(size, Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64'));
+  }
+
+  const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pinch-iconset-'));
+  const iconsetDir = path.join(stagingDir, 'icon.iconset');
+  await fs.mkdir(iconsetDir, { recursive: true });
+  try {
+    for (const [name, size] of ICONSET_SLOTS) {
+      await fs.writeFile(path.join(iconsetDir, name), renders.get(size));
+    }
+
+    const icnsFile = p('src-tauri/icons/icon.icns');
+    execFileSync('iconutil', ['-c', 'icns', iconsetDir, '-o', icnsFile]);
+    record(icnsFile, await fs.readFile(icnsFile), null, `${ICNS_SIZES.length} sizes`);
+  } finally {
+    await fs.rm(stagingDir, { recursive: true, force: true });
+  }
+
+  for (const [name, size] of TAURI_PNG_SLOTS) {
+    const file = p('src-tauri/icons', name);
+    const bytes = renders.get(size);
+    await fs.writeFile(file, bytes);
+    record(file, bytes, [size, size]);
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -689,9 +775,13 @@ async function buildScreenshots(browser) {
 /* Entry point                                                                 */
 /* -------------------------------------------------------------------------- */
 
-const ALL = ['icons', 'og', 'demo', 'shots'];
+const ALL = ['icons', 'macos', 'og', 'demo', 'shots'];
+// `macos` shells out to `iconutil` (macOS-only) and is opt-in: a bare,
+// argument-less run must keep working for contributors on any platform, so
+// it stays out of the implied "everything" set and has to be named explicitly.
+const DEFAULT = ALL.filter((target) => target !== 'macos');
 const requested = process.argv.slice(2).filter((arg) => !arg.startsWith('-'));
-const targets = requested.length ? requested : ALL;
+const targets = requested.length ? requested : DEFAULT;
 const unknown = targets.filter((target) => !ALL.includes(target));
 if (unknown.length) {
   console.error(`Unknown target(s): ${unknown.join(', ')}. Known: ${ALL.join(', ')}`);
@@ -702,6 +792,7 @@ const browser = await chromium.launch({ executablePath: chromeExecutable(), head
 try {
   const fonts = await fontFaceCss();
   if (targets.includes('icons')) await buildIcons(browser);
+  if (targets.includes('macos')) await buildMacosIcons(browser);
   if (targets.includes('og')) await buildOg(browser, fonts);
   if (targets.includes('demo')) await buildDemos(browser);
   if (targets.includes('shots')) await buildScreenshots(browser);

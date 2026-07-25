@@ -60,6 +60,8 @@
   import { appSettings } from './lib/settings/settings.svelte';
 
   import { createBatchQueue, looksLikeImage, type BatchQueueStore } from './lib/batch';
+  import { initPlatform, openExternal, openExternalLink } from './lib/platform';
+  import { initMenuListener } from './lib/platform/menu-listener';
   import { readPresetFromLocation } from './lib/presets';
   import { disposeSharedMetricsClient, getSharedMetricsClient } from './lib/metrics';
 
@@ -398,6 +400,51 @@
     };
   });
 
+  /**
+   * Native intake. A no-op in the browser.
+   *
+   * Its own `onMount` on purpose: the start-up handshake above is a long async
+   * chain, and macOS can hand us a cold-launch file before any of it resolves.
+   * `initPlatform` subscribes first and drains the Rust-side buffer second, so
+   * "Open With Pinch" on a closed app lands in the same `openInEditor` a drop
+   * on the window would. Files can arrive again at any time (Dock drop, second
+   * launch), each batch additive.
+   */
+  onMount(() => {
+    const disposePlatform = initPlatform({
+      onFiles: (files) => openInEditor(files),
+      onError: (message) => {
+        shellError = message;
+      },
+    });
+
+    // Native menu bar. A no-op on the web; the promise resolves after the
+    // dynamic import, so teardown holds the unsubscribe once it exists.
+    let disposeMenu: (() => void) | undefined;
+    let menuGone = false;
+    void initMenuListener({
+      open: () => filePicker?.click(),
+      closeTab: () => {
+        const active = tabs.active;
+        if (active) tabs.close(active.id);
+      },
+      settings: () => go('settings'),
+      view: (v) => {
+        if (v === 'editor' || v === 'matrix' || v === 'queue') go(v);
+      },
+      github: () => void openExternal('https://github.com/RamaHerbin/squish'),
+    }).then((dispose) => {
+      if (menuGone) dispose();
+      else disposeMenu = dispose;
+    });
+
+    return () => {
+      disposePlatform();
+      menuGone = true;
+      disposeMenu?.();
+    };
+  });
+
   onDestroy(() => {
     queue?.dispose();
     tabs.closeAll();
@@ -442,11 +489,14 @@
         <button type="button" class="home-link" onclick={() => openSettings('encoders')}>
           Formats
         </button>
+        <!-- `openExternalLink` is inert on the web; under Tauri it keeps the
+             app window from navigating to GitHub with no way back. -->
         <a
           class="home-link"
           href="https://github.com/RamaHerbin/squish"
           target="_blank"
           rel="noopener noreferrer"
+          onclick={openExternalLink}
         >
           Source
         </a>
