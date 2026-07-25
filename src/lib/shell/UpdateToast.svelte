@@ -16,12 +16,12 @@
   let reloading = $state(false);
 
   async function handleReload(): Promise<void> {
+    // Never reset: `swStatus.reload()` resolves as soon as the waiting worker
+    // has been told to take over, a moment before the page actually goes away.
+    // Flipping the label back to "Reload" in that gap is precisely what made
+    // this button look broken.
     reloading = true;
-    try {
-      await swStatus.reload();
-    } finally {
-      reloading = false;
-    }
+    await swStatus.reload();
   }
 </script>
 
