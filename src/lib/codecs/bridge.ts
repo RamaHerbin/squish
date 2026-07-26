@@ -36,6 +36,8 @@ import {
   createAbortError,
   fromTransferable,
   toTransferable,
+  WorkerLoadError,
+  WorkerTimeoutError,
   type CreateWorkerBridge,
   type EncoderOptionsMap,
   type RotateAngle,
@@ -49,11 +51,28 @@ import type { CodecWorkerApi } from './codec.worker';
 /** How long a worker may sit idle before it is terminated. Matches Squoosh. */
 export const WORKER_IDLE_TIMEOUT_MS = 10_000;
 
+/**
+ * Watchdog for a call that loaded a worker but never comes back — a wasm-threads
+ * deadlock, say. A worker that *fails to load* is caught instantly by the
+ * `error` listener; this only backstops a worker that wedged mid-call. The
+ * budget scales with the image so a genuinely heavy encode never false-fires: a
+ * truly hung worker emits nothing regardless of size, so even the ceiling
+ * catches it, while a real 24 MP AVIF stays comfortably under.
+ */
+export const WORKER_WATCHDOG_BASE_MS = 20_000;
+export const WORKER_WATCHDOG_PER_MP_MS = 4_000;
+export const WORKER_WATCHDOG_CEIL_MS = 120_000;
+
 export interface WorkerBridgeOptions {
   /** Worker factory. Override in tests to inject a fake endpoint. */
   createWorker?: () => Worker;
   /** Override {@link WORKER_IDLE_TIMEOUT_MS}. `Infinity` disables the timer. */
   idleTimeoutMs?: number;
+  /**
+   * Watchdog budget. `'auto'` (default) scales with the call's pixel count; a
+   * number pins a flat budget; `Infinity` disables the watchdog entirely.
+   */
+  watchdogMs?: number | 'auto';
 }
 
 /**
@@ -86,10 +105,12 @@ class CodecWorkerBridge implements WorkerBridgeApi {
 
   private readonly spawn: () => Worker;
   private readonly idleTimeoutMs: number;
+  private readonly watchdogMs: number | 'auto';
 
   constructor(options: WorkerBridgeOptions = {}) {
     this.spawn = options.createWorker ?? spawnCodecWorker;
     this.idleTimeoutMs = options.idleTimeoutMs ?? WORKER_IDLE_TIMEOUT_MS;
+    this.watchdogMs = options.watchdogMs ?? 'auto';
   }
 
   /* ---------------------------------------------------------------------- */
@@ -98,10 +119,49 @@ class CodecWorkerBridge implements WorkerBridgeApi {
 
   private connect(): Remote {
     if (!this.api) {
-      this.worker = this.spawn();
-      this.api = Comlink.wrap<CodecWorkerApi>(this.worker);
+      const worker = this.spawn();
+      // Comlink never observes a worker that fails to load — the encode message
+      // just goes nowhere and the call hangs. Listen for the worker's own
+      // failure events and settle everything in flight loudly instead.
+      worker.addEventListener('error', this.onWorkerError);
+      worker.addEventListener('messageerror', this.onWorkerError);
+      this.worker = worker;
+      this.api = Comlink.wrap<CodecWorkerApi>(worker);
     }
     return this.api;
+  }
+
+  /** A load/instantiation failure of the worker itself — never settles on its own. */
+  private readonly onWorkerError = (event: Event): void => {
+    const detail =
+      event instanceof ErrorEvent && event.message ? ` (${event.message})` : '';
+    this.disposeWorker();
+    this.failInFlight(
+      new WorkerLoadError(
+        `The codec worker failed to load${detail}. Reload the page and try again.`,
+      ),
+    );
+  };
+
+  /** Tear the worker down without settling callers. Callers pick the reason. */
+  private disposeWorker(): void {
+    if (!this.worker) return;
+    this.worker.removeEventListener('error', this.onWorkerError);
+    this.worker.removeEventListener('messageerror', this.onWorkerError);
+    this.worker.terminate();
+    this.worker = undefined;
+    this.api = undefined;
+  }
+
+  /**
+   * Reject every call awaiting the worker. Comlink calls to a dead worker never
+   * settle on their own — the messages simply go nowhere — so settle them here.
+   */
+  private failInFlight(reason: unknown): void {
+    if (this.inFlight.size === 0) return;
+    const pending = [...this.inFlight];
+    this.inFlight.clear();
+    for (const reject of pending) reject(reason);
   }
 
   private clearIdleTimer(): void {
@@ -119,22 +179,21 @@ class CodecWorkerBridge implements WorkerBridgeApi {
     }, this.idleTimeoutMs);
   }
 
+  /** Budget for the watchdog. `Infinity` means no watchdog for this call. */
+  private watchdogBudget(pixels?: number): number {
+    if (this.watchdogMs !== 'auto') return this.watchdogMs;
+    if (pixels === undefined) return WORKER_WATCHDOG_CEIL_MS;
+    const megapixels = pixels / 1_000_000;
+    return Math.min(
+      WORKER_WATCHDOG_CEIL_MS,
+      WORKER_WATCHDOG_BASE_MS + megapixels * WORKER_WATCHDOG_PER_MP_MS,
+    );
+  }
+
   terminate(): void {
     this.clearIdleTimer();
-
-    if (this.worker) {
-      this.worker.terminate();
-      this.worker = undefined;
-      this.api = undefined;
-    }
-
-    if (this.inFlight.size > 0) {
-      // Comlink calls to a dead worker never settle on their own; the messages
-      // simply go nowhere. Settle them here so awaiting callers unblock.
-      const pending = [...this.inFlight];
-      this.inFlight.clear();
-      for (const reject of pending) reject(createAbortError());
-    }
+    this.disposeWorker();
+    this.failInFlight(createAbortError());
   }
 
   /* ---------------------------------------------------------------------- */
@@ -157,6 +216,7 @@ class CodecWorkerBridge implements WorkerBridgeApi {
   private async execute<T>(
     signal: AbortSignal,
     task: (api: Remote) => Promise<T>,
+    budgetMs: number,
   ): Promise<T> {
     assertSignal(signal);
     this.clearIdleTimer();
@@ -165,19 +225,41 @@ class CodecWorkerBridge implements WorkerBridgeApi {
     const onAbort = () => this.terminate();
     signal.addEventListener('abort', onAbort, { once: true });
 
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await abortable(signal, this.track(task(api)));
+      const tracked = this.track(task(api));
+      if (!Number.isFinite(budgetMs)) {
+        return await abortable(signal, tracked);
+      }
+      const timedOut = new Promise<never>((_resolve, reject) => {
+        watchdog = setTimeout(() => {
+          // Reject the OUTER promise first so it wins this race. terminate()
+          // rejects the tracked call with an AbortError, which #runSide
+          // swallows — leaning on that would re-hang the spinner. Then reclaim
+          // the CPU; the worker respawns on the next call. The already-settled
+          // race still holds a handler on `tracked`, so its later AbortError is
+          // not an unhandled rejection.
+          reject(new WorkerTimeoutError());
+          this.terminate();
+        }, budgetMs);
+      });
+      return await abortable(signal, Promise.race([tracked, timedOut]));
     } finally {
+      if (watchdog !== undefined) clearTimeout(watchdog);
       signal.removeEventListener('abort', onAbort);
-      // Only arm the idle timer if a worker survived this call — an aborted
-      // call already terminated it.
+      // Only arm the idle timer if a worker survived this call — an aborted or
+      // timed-out call already terminated it.
       if (this.worker) this.scheduleIdleTerminate();
     }
   }
 
   /** Queue a call behind everything already in flight on this worker. */
-  private run<T>(signal: AbortSignal, task: (api: Remote) => Promise<T>): Promise<T> {
-    const result = this.queue.then(() => this.execute(signal, task));
+  private run<T>(
+    signal: AbortSignal,
+    task: (api: Remote) => Promise<T>,
+    budgetMs: number,
+  ): Promise<T> {
+    const result = this.queue.then(() => this.execute(signal, task, budgetMs));
     // The queue must keep flowing regardless of how this call ends, and must
     // not look like an unhandled rejection while the caller holds `result`.
     this.queue = result.then(
@@ -196,10 +278,14 @@ class CodecWorkerBridge implements WorkerBridgeApi {
     mimeType: WorkerDecodableMimeType,
     buffer: ArrayBuffer,
   ): Promise<ImageData> {
-    return this.run(signal, async (api) => {
-      const payload = await api.decode(mimeType, Comlink.transfer(buffer, [buffer]));
-      return fromTransferable(payload);
-    });
+    return this.run(
+      signal,
+      async (api) => {
+        const payload = await api.decode(mimeType, Comlink.transfer(buffer, [buffer]));
+        return fromTransferable(payload);
+      },
+      this.watchdogBudget(),
+    );
   }
 
   encode<K extends WorkerEncoderId>(
@@ -208,8 +294,10 @@ class CodecWorkerBridge implements WorkerBridgeApi {
     data: ImageData,
     options: EncoderOptionsMap[K],
   ): Promise<ArrayBuffer> {
-    return this.run(signal, (api) =>
-      api.encode(id, toTransferable(data), options as WorkerEncoderOptions),
+    return this.run(
+      signal,
+      (api) => api.encode(id, toTransferable(data), options as WorkerEncoderOptions),
+      this.watchdogBudget(data.width * data.height),
     );
   }
 
@@ -218,8 +306,10 @@ class CodecWorkerBridge implements WorkerBridgeApi {
     data: ImageData,
     options: WorkerResizeOptions,
   ): Promise<ImageData> {
-    return this.run(signal, async (api) =>
-      fromTransferable(await api.resize(toTransferable(data), options)),
+    return this.run(
+      signal,
+      async (api) => fromTransferable(await api.resize(toTransferable(data), options)),
+      this.watchdogBudget(data.width * data.height),
     );
   }
 
@@ -229,16 +319,24 @@ class CodecWorkerBridge implements WorkerBridgeApi {
    */
   rotate(signal: AbortSignal, data: ImageData, angle: RotateAngle): Promise<ImageData> {
     if (angle === 0) return Promise.resolve(data);
-    return this.run(signal, async (api) =>
-      fromTransferable(await api.rotate(toTransferable(data), angle)),
+    return this.run(
+      signal,
+      async (api) => fromTransferable(await api.rotate(toTransferable(data), angle)),
+      this.watchdogBudget(data.width * data.height),
     );
   }
 
   preload(id: WorkerEncoderId): void {
     const controller = new AbortController();
-    void this.run(controller.signal, (api) => api.preload(id)).catch(() => {
-      // Warm-up is advisory; a failure here is not the user's problem.
-    });
+    // Warm-up is advisory, but it still rides the serial queue: an Infinity
+    // budget on a deadlocked wasm `init()` would block every queued encode
+    // behind it, so its own watchdog could never start. Give preload the same
+    // no-pixel watchdog so a wedged init terminates and the queue drains.
+    void this.run(controller.signal, (api) => api.preload(id), this.watchdogBudget()).catch(
+      () => {
+        // A failure here is not the user's problem.
+      },
+    );
   }
 }
 

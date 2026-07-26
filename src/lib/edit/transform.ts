@@ -25,14 +25,15 @@ function makeImageData(
   data: Uint8ClampedArray<ArrayBuffer>,
   width: number,
   height: number,
+  colorSpace: PredefinedColorSpace = 'srgb',
 ): ImageData {
   if (typeof ImageData !== 'undefined') {
-    return new ImageData(data, width, height);
+    return new ImageData(data, width, height, { colorSpace });
   }
   // Duck-typed fallback for non-DOM environments (unit tests). Shape matches
   // the `ImageData` interface closely enough for anything that only reads
   // `data`/`width`/`height`.
-  return { data, width, height, colorSpace: 'srgb' } as ImageData;
+  return { data, width, height, colorSpace } as ImageData;
 }
 
 function clampInt(value: number, min: number, max: number): number {
@@ -62,7 +63,7 @@ export function rotate90(src: ImageData): ImageData {
       out[dstI + 3] = s[srcI + 3] ?? 0;
     }
   }
-  return makeImageData(out, dstW, dstH);
+  return makeImageData(out, dstW, dstH, src.colorSpace);
 }
 
 /** Rotate 180°. Dimensions are unchanged. */
@@ -79,7 +80,7 @@ export function rotate180(src: ImageData): ImageData {
     out[dstI + 2] = s[srcI + 2] ?? 0;
     out[dstI + 3] = s[srcI + 3] ?? 0;
   }
-  return makeImageData(out, width, height);
+  return makeImageData(out, width, height, src.colorSpace);
 }
 
 /**
@@ -105,7 +106,7 @@ export function rotate270(src: ImageData): ImageData {
       out[dstI + 3] = s[srcI + 3] ?? 0;
     }
   }
-  return makeImageData(out, dstW, dstH);
+  return makeImageData(out, dstW, dstH, src.colorSpace);
 }
 
 /**
@@ -116,7 +117,7 @@ export function rotate270(src: ImageData): ImageData {
 export function rotate(src: ImageData, angle: RotateAngle): ImageData {
   switch (angle) {
     case 0:
-      return makeImageData(new Uint8ClampedArray(src.data), src.width, src.height);
+      return makeImageData(new Uint8ClampedArray(src.data), src.width, src.height, src.colorSpace);
     case 90:
       return rotate90(src);
     case 180:
@@ -148,5 +149,5 @@ export function cropImageData(src: ImageData, rect: CropRect): ImageData {
     const dstStart = row * width * 4;
     out.set(srcData.subarray(srcStart, srcStart + width * 4), dstStart);
   }
-  return makeImageData(out, width, height);
+  return makeImageData(out, width, height, src.colorSpace);
 }

@@ -19,6 +19,11 @@ import type { HdrInfo, ImageMimeType } from '../contracts';
 
 export type { HdrInfo, HdrKind } from '../contracts';
 
+/** CICP colour primaries (ITU-T H.273): wide-gamut codes we widen to P3 for. */
+const PRIMARIES_BT2020 = 9;
+const PRIMARIES_DCI_P3 = 11;
+const PRIMARIES_DISPLAY_P3 = 12;
+
 /** How much of the file header the detector reads. Metadata sits up front. */
 export const HDR_SCAN_BYTES = 256 * 1024;
 
@@ -50,22 +55,34 @@ function findSequence(bytes: Uint8Array, ascii: string, from = 0): number {
   return -1;
 }
 
+interface Nclx {
+  primaries: number;
+  transfer: number;
+}
+
+function u16(bytes: Uint8Array, at: number): number | undefined {
+  const hi = bytes[at];
+  const lo = bytes[at + 1];
+  if (hi === undefined || lo === undefined) return undefined;
+  return (hi << 8) | lo;
+}
+
 /**
- * Scan ISO-BMFF bytes for a `colr` box of colour type `nclx` and read its
- * transfer characteristic. Layout after the 8-byte box header:
- * `nclx`(4) primaries(2) transfer(2) matrix(2) full_range(1).
+ * Scan ISO-BMFF bytes for a `colr` box of colour type `nclx` and read its CICP
+ * primaries + transfer. Layout after the 4-byte `colr`: colour_type(4)
+ * primaries(2) transfer(2) matrix(2) full_range(1). Here `typeAt` points at the
+ * 4-byte colour type (`nclx`).
  */
-function scanColrTransfer(bytes: Uint8Array): number | undefined {
+function scanColrNclx(bytes: Uint8Array): Nclx | undefined {
   let at = 0;
   for (;;) {
     const hit = findSequence(bytes, 'colr', at);
     if (hit === -1) return undefined;
     const typeAt = hit + 4;
     if (findSequence(bytes.subarray(typeAt, typeAt + 4), 'nclx') === 0) {
-      const transferAt = typeAt + 4 + 2;
-      const hi = bytes[transferAt];
-      const lo = bytes[transferAt + 1];
-      if (hi !== undefined && lo !== undefined) return (hi << 8) | lo;
+      const primaries = u16(bytes, typeAt + 4);
+      const transfer = u16(bytes, typeAt + 4 + 2);
+      if (primaries !== undefined && transfer !== undefined) return { primaries, transfer };
     }
     at = hit + 4;
   }
@@ -78,7 +95,7 @@ function scanColrTransfer(bytes: Uint8Array): number | undefined {
  */
 export function detectHdr(bytes: Uint8Array, mimeType: ImageMimeType | ''): HdrInfo | undefined {
   if (BMFF_MIME_TYPES.has(mimeType)) {
-    const transfer = scanColrTransfer(bytes);
+    const transfer = scanColrNclx(bytes)?.transfer;
     if (transfer === TRANSFER_PQ) return { kind: 'pq' };
     if (transfer === TRANSFER_HLG) return { kind: 'hlg' };
   }
@@ -89,6 +106,32 @@ export function detectHdr(bytes: Uint8Array, mimeType: ImageMimeType | ''): HdrI
   }
 
   return undefined;
+}
+
+/**
+ * The widest `ImageData` colour space worth decoding this source into. Answers
+ * `display-p3` when the ISO-BMFF `nclx` primaries are wide-gamut (BT.2020 or
+ * P3) — so PQ/BT.2020 and P3 sources are preserved instead of clipped to sRGB —
+ * and `srgb` otherwise. The pipeline can only *represent* srgb | display-p3, so
+ * BT.2020 is gamut-mapped into P3 (still strictly better than an sRGB clip).
+ *
+ * Only ISO-BMFF (AVIF/HEIC/HEIF) carries `nclx`; JPEG/PNG wide-gamut (ICC
+ * Display-P3) is not covered here and stays sRGB for now.
+ */
+export function preferredColorSpace(
+  bytes: Uint8Array,
+  mimeType: ImageMimeType | '',
+): PredefinedColorSpace {
+  if (!BMFF_MIME_TYPES.has(mimeType)) return 'srgb';
+  const primaries = scanColrNclx(bytes)?.primaries;
+  if (
+    primaries === PRIMARIES_BT2020 ||
+    primaries === PRIMARIES_DCI_P3 ||
+    primaries === PRIMARIES_DISPLAY_P3
+  ) {
+    return 'display-p3';
+  }
+  return 'srgb';
 }
 
 /** Short UI label for an HDR source, e.g. `HDR (PQ)`. */
