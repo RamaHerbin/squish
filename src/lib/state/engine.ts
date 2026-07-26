@@ -34,6 +34,7 @@ import {
   isAbortError,
   isVectorMimeType,
   isWorkerDecodableMimeType,
+  isWorkerFailure,
   isWorkerResizeMethod,
   mimeTypeFromFilename,
   preprocessorStateEqual,
@@ -60,6 +61,7 @@ import type {
   WorkerBridgeApi,
   WorkerResizeOptions,
 } from '../contracts';
+import { toSrgb } from '../codecs/canvas';
 
 /* -------------------------------------------------------------------------- */
 /* Errors                                                                      */
@@ -283,20 +285,27 @@ export function createImageData(
   data: Uint8ClampedArray,
   width: number,
   height: number,
+  colorSpace: PredefinedColorSpace = 'srgb',
 ): ImageData {
   if (typeof ImageData === 'function') {
     const Ctor = ImageData as unknown as new (
       data: Uint8ClampedArray,
       width: number,
       height: number,
+      settings?: ImageDataSettings,
     ) => ImageData;
-    return new Ctor(data, width, height);
+    return new Ctor(data, width, height, { colorSpace });
   }
-  return { data, width, height, colorSpace: 'srgb' } as unknown as ImageData;
+  return { data, width, height, colorSpace } as unknown as ImageData;
 }
 
 export function cloneImageData(image: ImageData): ImageData {
-  return createImageData(new Uint8ClampedArray(image.data), image.width, image.height);
+  return createImageData(
+    new Uint8ClampedArray(image.data),
+    image.width,
+    image.height,
+    image.colorSpace ?? 'srgb',
+  );
 }
 
 /**
@@ -469,8 +478,66 @@ async function encodeBytes(
 }
 
 /**
+ * The canvas encoder to fall back to when a wasm codec worker fails outright —
+ * never loaded, or wedged past the bridge watchdog. Only the three formats the
+ * browser can natively encode have an equivalent; `avif`/`jxl`/`qoi` have none,
+ * so those surface the worker error instead of silently changing format.
+ *
+ * Returns a pre-bound thunk so the concrete `id`↔`options` correlation is kept
+ * for `hooks.encodeBrowser`'s generic. wasm quality is 0–100, canvas quality is
+ * 0–1 — hence the divide.
+ */
+function browserFallbackFor(
+  settings: SideSettings,
+  hooks: EngineHooks,
+): { id: BrowserEncoderId; encode: (signal: AbortSignal, image: ImageData) => Promise<ArrayBuffer> } | undefined {
+  switch (settings.encoderId) {
+    case 'mozjpeg':
+      return {
+        id: 'browser-jpeg',
+        encode: (signal, image) =>
+          hooks.encodeBrowser(signal, 'browser-jpeg', image, {
+            quality: settings.encoderOptions.quality / 100,
+          }),
+      };
+    case 'webp': {
+      // The canvas API only encodes lossy WebP. A lossless/near-lossless request
+      // has no browser equivalent, so surface the worker error rather than
+      // silently shipping a lossy file under a lossless label.
+      if (settings.encoderOptions.lossless === 1 || settings.encoderOptions.near_lossless < 100) {
+        return undefined;
+      }
+      return {
+        id: 'browser-webp',
+        encode: (signal, image) =>
+          hooks.encodeBrowser(signal, 'browser-webp', image, {
+            quality: settings.encoderOptions.quality / 100,
+          }),
+      };
+    }
+    case 'oxipng':
+      return {
+        id: 'browser-png',
+        encode: (signal, image) => hooks.encodeBrowser(signal, 'browser-png', image, {}),
+      };
+    default:
+      return undefined;
+  }
+}
+
+/**
  * encode: pixels → `File`, named after the source with the encoder's extension.
  * `identity` short-circuits to the original file — no bytes are touched.
+ *
+ * If the wasm codec worker fails outright (a {@link isWorkerFailure}: load
+ * failure or watchdog timeout — never a user abort), and the format has a
+ * canvas equivalent, this retries once on the browser encoder and reports which
+ * one via `onFallback` so the UI can flag the degraded output. avif/jxl/qoi
+ * have no browser encoder, so the worker error propagates.
+ *
+ * `allowFallback` must be `false` for probe encodes (auto-suggest, matrix): a
+ * silent codec swap mid-search measures the wrong encoder and poisons the
+ * binary search, so those callers want the raw worker failure instead.
  */
 export async function runEncode(
   signal: AbortSignal,
@@ -480,12 +547,28 @@ export async function runEncode(
   bridge: WorkerBridgeApi,
   hooks: EngineHooks,
   registry?: EncoderRegistry,
+  onFallback?: (id: BrowserEncoderId) => void,
+  allowFallback = true,
 ): Promise<File> {
   assertSignal(signal);
   if (settings.encoderId === 'identity') return sourceFile;
 
-  const bytes = await abortable(signal, encodeBytes(signal, image, settings, bridge, hooks));
-  assertNotDetached(image, `encode(${settings.encoderId})`);
+  // The 8-bit codecs assume sRGB; gamut-map a wide-gamut source down first.
+  const srgb = toSrgb(image);
+
+  let bytes: ArrayBuffer;
+  try {
+    bytes = await abortable(signal, encodeBytes(signal, srgb, settings, bridge, hooks));
+  } catch (error) {
+    // The worker sends pixels by structured clone, not transfer, so `srgb` is
+    // still intact here and safe to re-encode on the canvas.
+    const fallback =
+      allowFallback && isWorkerFailure(error) ? browserFallbackFor(settings, hooks) : undefined;
+    if (!fallback) throw error;
+    bytes = await abortable(signal, fallback.encode(signal, srgb));
+    onFallback?.(fallback.id);
+  }
+  assertNotDetached(srgb, `encode(${settings.encoderId})`);
 
   const { mimeType, extension } = outputFor(settings.encoderId, registry);
   const name = extension ? replaceExtension(sourceFile.name, extension) : sourceFile.name;
@@ -534,10 +617,17 @@ function hasBuiltinDecode(): boolean {
   );
 }
 
-function createCanvasContext(width: number, height: number): CanvasRenderingContext2D {
+function createCanvasContext(
+  width: number,
+  height: number,
+  colorSpace?: PredefinedColorSpace,
+): CanvasRenderingContext2D {
+  const settings: CanvasRenderingContext2DSettings | undefined = colorSpace
+    ? { colorSpace }
+    : undefined;
   if (typeof OffscreenCanvas === 'function') {
     const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', settings);
     if (!ctx) throw new Error('Could not acquire a 2D context');
     return ctx as unknown as CanvasRenderingContext2D;
   }
@@ -547,7 +637,7 @@ function createCanvasContext(width: number, height: number): CanvasRenderingCont
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', settings);
   if (!ctx) throw new Error('Could not acquire a 2D context');
   return ctx;
 }
@@ -760,7 +850,9 @@ export async function defaultResizeOnMainThread(
   // Vector sources re-rasterise instead of resampling: infinitely crisper.
   if (vector) return rasteriseSvg(signal, vector.svgText, width, height);
 
-  const ctx = createCanvasContext(width, height);
+  // Keep the source's gamut through the resample, or a P3 source clips to sRGB.
+  const colorSpace = data.colorSpace ?? 'srgb';
+  const ctx = createCanvasContext(width, height, colorSpace);
   ctx.imageSmoothingEnabled = options.method !== 'browser-pixelated';
   ctx.imageSmoothingQuality = 'high';
 
@@ -774,7 +866,7 @@ export async function defaultResizeOnMainThread(
   } finally {
     bitmap.close();
   }
-  return ctx.getImageData(0, 0, width, height);
+  return ctx.getImageData(0, 0, width, height, { colorSpace });
 }
 
 /** Crop, clamped to the image. A plain row-wise copy: no canvas, no worker. */
@@ -794,7 +886,7 @@ export async function defaultCrop(
     const start = ((y + row) * data.width + x) * 4;
     out.set(data.data.subarray(start, start + width * 4), row * width * 4);
   }
-  return createImageData(out, width, height);
+  return createImageData(out, width, height, data.colorSpace ?? 'srgb');
 }
 
 export function createDefaultEngineHooks(): EngineHooks {

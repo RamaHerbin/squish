@@ -3,14 +3,14 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { HDR_SCAN_BYTES, detectHdr, hdrLabel } from './hdr';
+import { HDR_SCAN_BYTES, detectHdr, hdrLabel, preferredColorSpace } from './hdr';
 
 function ascii(text: string): number[] {
   return [...text].map((c) => c.charCodeAt(0));
 }
 
-/** Minimal `colr`/nclx box: header + `nclx` + primaries + transfer + matrix + range. */
-function colrBox(transfer: number): number[] {
+/** Minimal `colr`/nclx box with explicit CICP primaries + transfer. */
+function colrBoxP(primaries: number, transfer: number): number[] {
   return [
     0x00,
     0x00,
@@ -18,14 +18,19 @@ function colrBox(transfer: number): number[] {
     0x13,
     ...ascii('colr'),
     ...ascii('nclx'),
-    0x00,
-    0x09, // primaries: BT.2020
+    (primaries >> 8) & 0xff,
+    primaries & 0xff,
     (transfer >> 8) & 0xff,
     transfer & 0xff,
     0x00,
     0x09, // matrix
     0x80, // full range
   ];
+}
+
+/** Minimal `colr`/nclx box: header + `nclx` + primaries + transfer + matrix + range. */
+function colrBox(transfer: number): number[] {
+  return colrBoxP(9, transfer); // primaries: BT.2020
 }
 
 function heicHeader(...rest: number[]): Uint8Array {
@@ -77,6 +82,29 @@ describe('detectHdr', () => {
     const file = fileURLToPath(new URL('../../../public/demo/demo-hdr.avif', import.meta.url));
     const head = readFileSync(file).subarray(0, HDR_SCAN_BYTES);
     expect(detectHdr(new Uint8Array(head), 'image/avif')).toEqual({ kind: 'pq' });
+  });
+});
+
+describe('preferredColorSpace', () => {
+  it('widens BT.2020 and P3 primaries to display-p3 in BMFF files', () => {
+    expect(preferredColorSpace(heicHeader(...colrBoxP(9, 16)), 'image/avif')).toBe('display-p3'); // BT.2020
+    expect(preferredColorSpace(heicHeader(...colrBoxP(11, 13)), 'image/heic')).toBe('display-p3'); // DCI-P3
+    expect(preferredColorSpace(heicHeader(...colrBoxP(12, 13)), 'image/avif')).toBe('display-p3'); // Display P3
+  });
+
+  it('keeps BT.709/sRGB primaries as srgb', () => {
+    expect(preferredColorSpace(heicHeader(...colrBoxP(1, 13)), 'image/heic')).toBe('srgb');
+  });
+
+  it('does not read colr outside BMFF, and defaults to srgb', () => {
+    expect(preferredColorSpace(heicHeader(...colrBoxP(9, 16)), 'image/png')).toBe('srgb');
+    expect(preferredColorSpace(new Uint8Array(0), 'image/heic')).toBe('srgb');
+  });
+
+  it('reads the bundled HDR sample (BT.2020) as wide-gamut', () => {
+    const file = fileURLToPath(new URL('../../../public/demo/demo-hdr.avif', import.meta.url));
+    const head = readFileSync(file).subarray(0, HDR_SCAN_BYTES);
+    expect(preferredColorSpace(new Uint8Array(head), 'image/avif')).toBe('display-p3');
   });
 });
 

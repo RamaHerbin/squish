@@ -229,11 +229,14 @@ const api: CodecWorkerApi = {
   async resize(data: TransferableImageData, options: WorkerResizeOptions) {
     const { default: resize } = await loadResizer();
     const payload = toTransferable(await resize(fromTransferable(data), options));
+    // Resize is colour-space-neutral; keep the source's label across the trip.
+    payload.colorSpace = data.colorSpace;
     return Comlink.transfer(payload, transferListFor(payload));
   },
 
   async rotate(data: TransferableImageData, angle: RotateAngle) {
     const payload = rotateTransferable(data, angle);
+    payload.colorSpace = data.colorSpace;
     return Comlink.transfer(payload, transferListFor(payload));
   },
 

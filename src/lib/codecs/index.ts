@@ -43,6 +43,7 @@ export {
   drawDataToCanvas,
   drawableToImageData,
   loadImageElement,
+  toSrgb,
   type BuiltinResizeMethod,
   type DrawableToImageDataOptions,
 } from './canvas';

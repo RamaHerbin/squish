@@ -29,7 +29,13 @@ interface Canvas2DLike {
   imageSmoothingQuality: ImageSmoothingQuality;
   clearRect(x: number, y: number, width: number, height: number): void;
   putImageData(data: ImageData, dx: number, dy: number): void;
-  getImageData(sx: number, sy: number, sw: number, sh: number): ImageData;
+  getImageData(
+    sx: number,
+    sy: number,
+    sw: number,
+    sh: number,
+    settings?: ImageDataSettings,
+  ): ImageData;
   drawImage(
     image: CanvasImageSource,
     sx: number,
@@ -41,6 +47,28 @@ interface Canvas2DLike {
     dw: number,
     dh: number,
   ): void;
+}
+
+/**
+ * The colour space of an `ImageData`, defaulting to sRGB. The node/vitest
+ * fallback objects always carry `'srgb'`; native `ImageData` carries whatever
+ * `getImageData`/`new ImageData` was told. Wide-gamut sources ride `display-p3`.
+ */
+export function colorSpaceOf(data: ImageData): PredefinedColorSpace {
+  return data.colorSpace ?? 'srgb';
+}
+
+/** Whether this realm can round-trip pixels in `colorSpace` (Phase-1 probe). */
+export function supportsColorSpace(colorSpace: PredefinedColorSpace): boolean {
+  if (colorSpace === 'srgb') return true;
+  try {
+    const canvas = createCanvas(1, 1);
+    const ctx = (canvas as HTMLCanvasElement).getContext('2d', { colorSpace });
+    // A browser that ignores the option hands back an sRGB context.
+    return !!ctx && ctx.getContextAttributes().colorSpace === colorSpace;
+  } catch {
+    return false;
+  }
 }
 
 /** Allocate the best canvas this realm offers. */
@@ -55,17 +83,46 @@ export function createCanvas(width: number, height: number): AnyCanvas {
   throw new Error('No canvas implementation is available in this environment');
 }
 
-function context2d(canvas: AnyCanvas): Canvas2DLike {
-  const ctx = (canvas as HTMLCanvasElement).getContext('2d');
+function context2d(canvas: AnyCanvas, colorSpace?: PredefinedColorSpace): Canvas2DLike {
+  const ctx = (canvas as HTMLCanvasElement).getContext(
+    '2d',
+    colorSpace ? { colorSpace } : undefined,
+  );
   if (!ctx) throw new Error('Could not create a 2D canvas context');
   return ctx as unknown as Canvas2DLike;
 }
 
-/** Replace a canvas' contents with `data`. */
+/** Replace a canvas' contents with `data`, honouring its colour space. */
 export function drawDataToCanvas(canvas: AnyCanvas, data: ImageData): void {
-  const ctx = context2d(canvas);
+  const ctx = context2d(canvas, colorSpaceOf(data));
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.putImageData(data, 0, 0);
+}
+
+/**
+ * Gamut-map pixels down to sRGB, letting the browser clip out-of-gamut colours.
+ * A no-op when the data is already sRGB (the common case), so nothing
+ * round-trips that path. Used wherever wide-gamut pixels meet something that
+ * assumes unprofiled sRGB: the 8-bit encoders, and SSIM measurement.
+ */
+export function toSrgb(data: ImageData): ImageData {
+  if (colorSpaceOf(data) === 'srgb') return data;
+  const source = createCanvas(data.width, data.height);
+  drawDataToCanvas(source, data);
+  const dest = createCanvas(data.width, data.height);
+  const ctx = context2d(dest, 'srgb');
+  ctx.drawImage(
+    source as CanvasImageSource,
+    0,
+    0,
+    data.width,
+    data.height,
+    0,
+    0,
+    data.width,
+    data.height,
+  );
+  return ctx.getImageData(0, 0, data.width, data.height, { colorSpace: 'srgb' });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -114,6 +171,11 @@ export interface DrawableToImageDataOptions {
   sy?: number;
   sw?: number;
   sh?: number;
+  /**
+   * Read back in this colour space. `display-p3` preserves wide-gamut sources
+   * the browser would otherwise clip to sRGB on read. Defaults to sRGB.
+   */
+  colorSpace?: PredefinedColorSpace;
 }
 
 type Drawable = ImageBitmap | HTMLImageElement | VideoFrame | HTMLCanvasElement | OffscreenCanvas;
@@ -146,14 +208,15 @@ export function drawableToImageData(
     sy = 0,
     sw = naturalWidth,
     sh = naturalHeight,
+    colorSpace,
   } = options;
 
   if (width < 1 || height < 1) throw new Error('Cannot rasterise to a zero-sized canvas');
 
   const canvas = createCanvas(width, height);
-  const ctx = context2d(canvas);
+  const ctx = context2d(canvas, colorSpace);
   ctx.drawImage(drawable as CanvasImageSource, sx, sy, sw, sh, 0, 0, width, height);
-  return ctx.getImageData(0, 0, width, height);
+  return ctx.getImageData(0, 0, width, height, colorSpace ? { colorSpace } : undefined);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -179,11 +242,12 @@ export function builtinResize(
   dh: number,
   method: BuiltinResizeMethod,
 ): ImageData {
+  const colorSpace = colorSpaceOf(data);
   const source = createCanvas(data.width, data.height);
   drawDataToCanvas(source, data);
 
   const dest = createCanvas(dw, dh);
-  const ctx = context2d(dest);
+  const ctx = context2d(dest, colorSpace);
 
   if (method === 'pixelated') {
     ctx.imageSmoothingEnabled = false;
@@ -193,7 +257,7 @@ export function builtinResize(
   }
 
   ctx.drawImage(source as CanvasImageSource, sx, sy, sw, sh, 0, 0, dw, dh);
-  return ctx.getImageData(0, 0, dw, dh);
+  return ctx.getImageData(0, 0, dw, dh, { colorSpace });
 }
 
 /* -------------------------------------------------------------------------- */

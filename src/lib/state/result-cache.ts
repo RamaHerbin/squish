@@ -76,7 +76,12 @@ export class LruResultCache implements ResultCache {
       this.#entries.unshift(entry);
     }
 
-    return { processed: entry.processed, data: entry.data, file: entry.file };
+    return {
+      processed: entry.processed,
+      data: entry.data,
+      file: entry.file,
+      encoderFallback: entry.encoderFallback,
+    };
   }
 
   clear(): void {

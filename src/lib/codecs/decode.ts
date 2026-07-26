@@ -46,8 +46,13 @@ import {
   hasDocument,
   hasImageDecoder,
 } from './capabilities';
-import { blobToImg, drawableToImageData, type DrawableToImageDataOptions } from './canvas';
-import { HDR_SCAN_BYTES, detectHdr } from './hdr';
+import {
+  blobToImg,
+  drawableToImageData,
+  supportsColorSpace,
+  type DrawableToImageDataOptions,
+} from './canvas';
+import { HDR_SCAN_BYTES, detectHdr, preferredColorSpace } from './hdr';
 
 /* -------------------------------------------------------------------------- */
 /* Sniffing                                                                    */
@@ -98,12 +103,16 @@ export async function sniffMimeType(blob: Blob, filename = ''): Promise<MimeSnif
 /* Native decoding                                                             */
 /* -------------------------------------------------------------------------- */
 
-async function decodeWithImageDecoder(blob: Blob, mimeType: string): Promise<ImageData> {
+async function decodeWithImageDecoder(
+  blob: Blob,
+  mimeType: string,
+  colorSpace?: PredefinedColorSpace,
+): Promise<ImageData> {
   const decoder = new ImageDecoder({ data: await blob.arrayBuffer(), type: mimeType });
   try {
     const { image } = await decoder.decode();
     try {
-      return drawableToImageData(image);
+      return drawableToImageData(image, { colorSpace });
     } finally {
       image.close();
     }
@@ -112,10 +121,13 @@ async function decodeWithImageDecoder(blob: Blob, mimeType: string): Promise<Ima
   }
 }
 
-async function decodeWithImageBitmap(blob: Blob): Promise<ImageData> {
+async function decodeWithImageBitmap(
+  blob: Blob,
+  colorSpace?: PredefinedColorSpace,
+): Promise<ImageData> {
   const bitmap = await createImageBitmap(blob);
   try {
-    return drawableToImageData(bitmap);
+    return drawableToImageData(bitmap, { colorSpace });
   } finally {
     bitmap.close();
   }
@@ -126,18 +138,21 @@ async function decodeWithImageBitmap(blob: Blob): Promise<ImageData> {
  *
  * @param mimeType the sniffed type; required by `ImageDecoder`, ignored by the
  *   other two paths (which re-sniff internally).
+ * @param colorSpace read pixels back in this space — `display-p3` for a
+ *   wide-gamut source so the browser doesn't clip it to sRGB. Defaults to sRGB.
  */
 export async function builtinDecode(
   signal: AbortSignal,
   blob: Blob,
   mimeType: OutputMimeType = '',
+  colorSpace?: PredefinedColorSpace,
 ): Promise<ImageData> {
   assertSignal(signal);
   let lastError: unknown;
 
   if (mimeType && hasImageDecoder()) {
     try {
-      return await abortable(signal, decodeWithImageDecoder(blob, mimeType));
+      return await abortable(signal, decodeWithImageDecoder(blob, mimeType, colorSpace));
     } catch (error) {
       if (isAbortError(error)) throw error;
       lastError = error;
@@ -146,7 +161,7 @@ export async function builtinDecode(
 
   if (hasCreateImageBitmap()) {
     try {
-      return await abortable(signal, decodeWithImageBitmap(blob));
+      return await abortable(signal, decodeWithImageBitmap(blob, colorSpace));
     } catch (error) {
       if (isAbortError(error)) throw error;
       lastError = error;
@@ -156,7 +171,7 @@ export async function builtinDecode(
   if (hasDocument()) {
     assertSignal(signal);
     const img = await abortable(signal, blobToImg(blob));
-    return drawableToImageData(img);
+    return drawableToImageData(img, { colorSpace });
   }
 
   throw lastError instanceof Error
@@ -269,12 +284,18 @@ export async function decodeBlob(
     return { data, mimeType, vector: { svgText }, usedBuiltinDecoder: true };
   }
 
-  // HDR is detected from the header bytes, independently of which decoder
-  // ends up producing the (tone-mapped SDR) pixels.
-  const hdr = detectHdr(
-    new Uint8Array(await abortable(signal, blob.slice(0, HDR_SCAN_BYTES).arrayBuffer())),
-    mimeType,
+  // HDR and gamut are both read from the header bytes, independently of which
+  // decoder ends up producing pixels. Gamut picks the readback colour space so
+  // a wide-gamut source is preserved instead of clipped to sRGB.
+  const header = new Uint8Array(
+    await abortable(signal, blob.slice(0, HDR_SCAN_BYTES).arrayBuffer()),
   );
+  const hdr = detectHdr(header, mimeType);
+  // Widen only when the source is wide-gamut AND this browser can round-trip P3;
+  // otherwise stay sRGB (the pre-existing behaviour) rather than risk a throw.
+  const wide = preferredColorSpace(header, mimeType);
+  const colorSpace: PredefinedColorSpace =
+    wide === 'display-p3' && supportsColorSpace('display-p3') ? 'display-p3' : 'srgb';
 
   // Captured as a separate binding so the narrowed type survives into the
   // closure below.
@@ -288,7 +309,7 @@ export async function decodeBlob(
     ? await abortable(signal, canDecodeImageType(mimeType))
     : false;
 
-  const runBuiltin = () => builtinDecode(signal, blob, mimeType);
+  const runBuiltin = () => builtinDecode(signal, blob, mimeType, colorSpace);
   const runWasm = wasmMimeType
     ? async () => {
         const bridge = await resolveBridge(options);
