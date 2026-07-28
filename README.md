@@ -14,7 +14,10 @@
 </p>
 
 <p align="center">
-  <img src="./docs/media/claude-for-open-source.svg" alt="Claude for Open Source Program" width="280">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/media/claude-for-open-source-dark.svg">
+    <img src="./docs/media/claude-for-open-source.svg" alt="Claude for Open Source Program" width="280">
+  </picture>
 </p>
 
 <p align="center">
