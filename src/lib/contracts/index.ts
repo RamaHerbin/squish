@@ -19,6 +19,7 @@ export * from './worker';
 export * from './presets';
 export * from './batch';
 export * from './pinch';
+export * from './pdf';
 export * from './version';
 
 /* -------------------------------------------------------------------------- */
