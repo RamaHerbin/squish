@@ -14,6 +14,10 @@
 </p>
 
 <p align="center">
+  <img src="./docs/media/claude-for-open-source.svg" alt="Claude for Open Source Program" width="280">
+</p>
+
+<p align="center">
   <img src="./docs/media/editor.png" alt="The Pinch editor: the original and a MozJPEG encode under one draggable reveal divider, with size, savings and SSIM readouts" width="900">
 </p>
 
