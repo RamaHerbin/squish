@@ -198,6 +198,6 @@ export default defineConfig({
     // Default include, minus anything the agent harness drops into .claude/
     // (a stray worktree there once doubled the whole suite) and the Tauri
     // crate's target directory.
-    exclude: ['**/node_modules/**', '**/dist/**', '**/.claude/**', '**/src-tauri/**'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/.claude/**', '**/src-tauri/**', '**/e2e/**'],
   },
 });

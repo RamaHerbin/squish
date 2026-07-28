@@ -145,7 +145,7 @@ trade costs you nothing.
 ## What is the relationship to Squoosh?
 
 Squoosh is the reason Pinch exists. It proved the whole idea — codecs in WebAssembly,
-running client-side, with a real comparison view — and it is no longer maintained.
+running client-side, with a real comparison view.
 
 What is shared:
 
