@@ -37,3 +37,40 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  e2e:
+    name: e2e (codec smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # webServer in playwright.config.ts builds + serves the preview (COOP/COEP),
+      # so the browser is cross-origin-isolated and the threaded codecs are the
+      # ones actually exercised.
+      - name: E2E codec smoke
+        run: npm run test:e2e
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
