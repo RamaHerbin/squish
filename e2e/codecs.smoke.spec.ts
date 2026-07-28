@@ -52,14 +52,17 @@ test('converts a JPEG with every core wasm codec', async ({ page }) => {
   const trigger = page.locator('button[aria-label^="Encoder:"]');
   const download = page.locator('button.download');
   const figure = page.locator('.card-output .figure');
+  const meta = page.locator('.card-output .meta');
 
-  // The on-load default encoder produced an output (whichever it is).
+  // The on-load default encoder produced an output (whichever it is)…
   await expect(download).toBeEnabled({ timeout: 45_000 });
   await expect(figure).toHaveText(/\d/, { timeout: 45_000 });
   await expect(page.locator('canvas[aria-label="Output"]')).toBeVisible();
+  // …and it came from the real wasm codec, not the browser fallback (see below).
+  await expect(meta).not.toContainText('browser encoder');
 
   for (const codec of WASM_CODECS) {
-    await expectEncoded(page, codec, { trigger, download, figure });
+    await expectEncoded(page, codec, { trigger, download, figure, meta });
   }
 
   expect(fatal, `fatal console/page errors during conversion:\n${fatal.join('\n')}`).toEqual([]);
@@ -69,6 +72,7 @@ type Signals = {
   trigger: ReturnType<Page['locator']>;
   download: ReturnType<Page['locator']>;
   figure: ReturnType<Page['locator']>;
+  meta: ReturnType<Page['locator']>;
 };
 
 /** Select `codec` and wait for its re-encode to actually land. */
@@ -91,4 +95,12 @@ async function expectEncoded(page: Page, codec: string, s: Signals): Promise<voi
   await expect(s.figure).not.toHaveText(before, { timeout: 45_000 });
   await expect(s.figure).toHaveText(/\d/, { timeout: 45_000 });
   await expect(s.download).toBeEnabled({ timeout: 45_000 });
+
+  // Crucial: WebP/MozJPEG/OxiPNG have a browser-encoder fallback that `runEncode`
+  // uses transparently when the wasm worker fails (the caught rejection never
+  // reaches the console listeners). The output meta is tagged `browser encoder`
+  // in that case — so a settled, resized output alone would let a broken wasm
+  // codec pass. Assert the real codec produced it. (AVIF/JXL/QOI have no
+  // fallback and would surface a fatal console error instead.)
+  await expect(s.meta).not.toContainText('browser encoder', { timeout: 45_000 });
 }
