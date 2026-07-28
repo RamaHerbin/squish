@@ -248,6 +248,12 @@ export interface Placement {
   /** The `/Name` used in the content stream, resolved by the caller. */
   readonly name: string;
   readonly ctm: Matrix;
+  /**
+   * The image object's ref (e.g. `"12 0 R"`), when the resolver supplied one.
+   * Carried through so a caller can attribute a placement to the right image
+   * even when the same `/Name` means different objects in nested form scopes.
+   */
+  readonly ref?: string;
 }
 
 /**
@@ -256,7 +262,7 @@ export interface Placement {
  */
 export interface XObjectResolver {
   (name: string):
-    | { readonly kind: 'image' }
+    | { readonly kind: 'image'; readonly ref?: string }
     | {
         readonly kind: 'form';
         readonly contents: Uint8Array;
@@ -319,7 +325,7 @@ export function walkContentStream(
         const target = resolve(last.value);
         if (!target) break;
         if (target.kind === 'image') {
-          placements.push({ name: last.value, ctm });
+          placements.push({ name: last.value, ctm, ref: target.ref });
           break;
         }
         const inner = target.matrix ? multiply(target.matrix, ctm) : ctm;
