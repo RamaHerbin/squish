@@ -19,10 +19,9 @@
 
 <p align="center"><strong>Try it: https://pinch.rama.app</strong></p>
 
-Pinch is a spiritual successor to [Squoosh](https://github.com/GoogleChromeLabs/squoosh),
-which is no longer maintained. Same idea — codecs compiled to WebAssembly, running in
-your browser — rebuilt on a current stack, with the batch, metrics and comparison
-features Squoosh never got.
+Pinch is a modern, privacy-first alternative to [Squoosh](https://github.com/GoogleChromeLabs/squoosh)
+— same idea, codecs compiled to WebAssembly running in your browser, rebuilt on a
+current stack, with the batch, metrics and comparison features Squoosh doesn't have.
 
 Every codec runs locally. There is no server, no upload, no account, no analytics, and
 the app works with the network switched off once it has been loaded.
@@ -79,7 +78,7 @@ Pinch does not.
 
 | | Pinch | Squoosh |
 | --- | --- | --- |
-| Actively maintained | Yes | No — upstream stopped active development |
+| Actively maintained | Yes | Intermittent (last release 2024) |
 | Codecs (wasm) | AVIF, JPEG XL, WebP, MozJPEG, OxiPNG, QOI | AVIF, JPEG XL, WebP, WebP v2 (experimental), MozJPEG, OxiPNG, QOI |
 | Batch / folder queue | Yes, with ZIP export | No — one image at a time |
 | Quality metrics | SSIM per encode, in a worker, with verdicts | No |
