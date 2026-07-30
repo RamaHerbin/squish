@@ -27,6 +27,7 @@
 import {
   EXTENSION_BY_MIME,
   MIME_SNIFF_BYTES,
+  PDF_NOT_AN_IMAGE_MESSAGE,
   abortable,
   assertSignal,
   createDefaultProcessorState,
@@ -771,7 +772,7 @@ export async function defaultDecodeSource(
   const { mimeType, unsupported } = await sniffFile(signal, file);
 
   if (unsupported === 'application/pdf') {
-    throw new Error('PDFs are not images — export a page as PNG or JPEG first.');
+    throw new Error(PDF_NOT_AN_IMAGE_MESSAGE);
   }
 
   if (isVectorMimeType(mimeType)) {

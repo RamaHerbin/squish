@@ -18,6 +18,7 @@
 import {
   EXTENSION_BY_MIME,
   MIME_SNIFF_BYTES,
+  PDF_NOT_AN_IMAGE_MESSAGE,
   abortable,
   assertSignal,
   getContainOffsets,
@@ -148,7 +149,7 @@ export async function sniffFileMimeType(
   const sniffed = sniffMimeTypeFromBytes(head);
 
   if (sniffed === 'application/pdf') {
-    throw new Error('PDF is not an image — export the pages first');
+    throw new Error(PDF_NOT_AN_IMAGE_MESSAGE);
   }
   if (sniffed !== '') return sniffed;
 

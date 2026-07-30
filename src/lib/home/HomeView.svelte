@@ -19,9 +19,13 @@
     APP_VERSION_TAG,
     EXTENSION_BY_MIME,
     FILE_PICKER_ACCEPT,
+    PDF_FILE_PICKER_ACCEPT,
     mimeTypeFromFilename,
     type ImageMimeType,
   } from '$lib/contracts';
+
+  /** Images *and* PDFs; the shell routes a picked PDF to its own screen. */
+  const PICKER_ACCEPT = `${FILE_PICKER_ACCEPT},${PDF_FILE_PICKER_ACCEPT}`;
 
   /** Real MIME per sample; the response blob's type as fallback, never SVG by default. */
   function mimeTypeForSample(name: string, blob: Blob): string {
@@ -37,20 +41,28 @@
     readonly url: string;
     readonly name: string;
     readonly label: string;
-    readonly width: number;
-    readonly height: number;
+    /** Pixel dimensions, for the card caption. Omitted for a non-raster sample. */
+    readonly width?: number;
+    readonly height?: number;
     readonly initial: string;
     readonly accent: AccentName;
     readonly format: string;
+    /**
+     * Artwork for the card's thumbnail. Defaults to {@link DemoSample.url} —
+     * only a sample `<img>` cannot render (a PDF) needs to point elsewhere.
+     */
+    readonly thumbUrl?: string;
+    /** Replaces `width × height` in the caption when there is nothing pixel-sized to say. */
+    readonly specs?: string;
   }
 
   /**
-   * Bundled sample images (`public/demo/`) — synthetic, so no third-party
-   * rights ride along, and one editorial series so the row reads as a set.
-   * Each covers a different case for the codecs: continuous tone, flat
-   * artwork, vector, HDR. The three rasters are painted deterministically by
-   * `scripts/generate-assets.mjs`; the SVG is hand-authored source. Sizes are
-   * fetched at runtime, never hard-coded.
+   * Bundled samples (`public/demo/`) — synthetic, so no third-party rights ride
+   * along, and one editorial series so the row reads as a set. Each covers a
+   * different case: continuous tone, flat artwork, vector, HDR, and a PDF
+   * carrying embedded images. The rasters and the PDF are built
+   * deterministically by `scripts/generate-assets.mjs`; the SVG is hand-authored
+   * source. Sizes are fetched at runtime, never hard-coded.
    */
   const DEMO_SAMPLES: readonly DemoSample[] = [
     {
@@ -101,9 +113,25 @@
       accent: 'purple',
       format: 'AVIF',
     },
+    {
+      // Not an image, and deliberately in the same row: dropping a PDF is how
+      // the PDF screen is reached, so the sample that demonstrates it belongs
+      // where the other samples are. The thumbnail borrows page 1's artwork
+      // because an `<img>` cannot render a PDF.
+      id: 'report',
+      url: '/demo/demo-report.pdf',
+      name: 'demo-report.pdf',
+      label: 'Two-page image report',
+      initial: 'D',
+      accent: 'yellow',
+      format: 'PDF',
+      thumbUrl: '/demo/demo-gradient.jpg',
+      specs: '2 pages',
+    },
   ];
 
-  const SAMPLE_SLOT_COUNT = 4;
+  /** Five samples plus one ghost, so the two-column grid ends on a full row. */
+  const SAMPLE_SLOT_COUNT = 6;
 
   interface Props {
     /** Every image file gathered from a drop, paste, or the file picker. */
@@ -159,6 +187,14 @@
   function sampleSizeLabel(demo: DemoSample): string {
     const meta = sampleMeta[demo.id];
     return meta ? formatBytes(meta.bytes) : '···';
+  }
+
+  /** `1.2 MB · 1600 × 1200` for a raster, `18 KB · 2 pages` for the PDF. */
+  function sampleSpecsLabel(demo: DemoSample): string {
+    const detail =
+      demo.specs ?? (demo.width && demo.height ? `${demo.width} × ${demo.height}` : undefined);
+    const size = sampleSizeLabel(demo);
+    return detail ? `${size} · ${detail}` : size;
   }
 
   function filesFromTransfer(dt: DataTransfer | null): File[] {
@@ -375,14 +411,14 @@
 
         {#if !isCompact}
           <div class="corner corner-left" aria-hidden="true">JPEG · PNG · WEBP · AVIF · HEIC · SVG · GIF</div>
-          <div class="corner corner-right" aria-hidden="true">MAX 50 MB / FILE</div>
+          <div class="corner corner-right" aria-hidden="true">MAX 50 MB / IMAGE · 150 MB / PDF</div>
         {/if}
       </div>
 
       <input
         bind:this={fileInput}
         type="file"
-        accept={FILE_PICKER_ACCEPT}
+        accept={PICKER_ACCEPT}
         multiple
         class="sr-only"
         tabindex="-1"
@@ -414,7 +450,7 @@
                   onclick={() => void useSample(demo)}
                 >
                   <span class="sample-thumb">
-                    <img src={demo.url} alt="" loading="lazy" />
+                    <img src={demo.thumbUrl ?? demo.url} alt="" loading="lazy" />
                   </span>
                   <span class="sample-row">
                     <span class="sample-initial" style={`background:${accentFill(demo.accent)};`}>
@@ -424,9 +460,7 @@
                       <span class="sample-name truncate">
                         {loadingSample === demo.id ? 'Loading…' : demo.name}
                       </span>
-                      <span class="sample-specs">
-                        {sampleSizeLabel(demo)} · {demo.width} × {demo.height}
-                      </span>
+                      <span class="sample-specs">{sampleSpecsLabel(demo)}</span>
                     </span>
                     <Chip tone={demo.accent} size="xs">{demo.format}</Chip>
                   </span>
@@ -639,6 +673,18 @@
     right: 16px;
   }
 
+  /*
+   * Both corners are one line of mono in the same gutter, and the right-hand
+   * one now carries two limits instead of one. Below this the two strings meet
+   * in the middle of the dropzone, so the format list — the less load-bearing
+   * of the two — gives way first.
+   */
+  @media (width <= 860px) {
+    .corner-left {
+      display: none;
+    }
+  }
+
   .samples {
     display: flex;
     flex-direction: column;
@@ -656,7 +702,7 @@
   .samples-grid {
     display: grid;
     /*
-     * 2×2, not a row of four. The samples column is 793px wide, so four cards
+     * Two columns, not a row of four. The samples column is 793px wide, so four cards
      * across leaves 186px each — and a card's min-content is 235px, driven by
      * the byte size and the pixel dimensions sitting side by side. A row of
      * four either overflows the column by ~190px (`1fr` floors at min-content)

@@ -46,6 +46,8 @@ const IMAGE_FILE_HANDLER_ACCEPT: Record<string, string[]> = {
   'image/heic': ['.heic'],
   'image/heif': ['.heif'],
   'image/svg+xml': ['.svg'],
+  // Not an image — opening a PDF this way routes to the PDF view, not the editor.
+  'application/pdf': ['.pdf'],
 };
 
 /**

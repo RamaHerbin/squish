@@ -9,6 +9,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **PDF** — Drop a PDF to recompress its embedded images in place: per-image analysis table
+  with a live plan preview, quality/DPI controls, optional SSIM, dedupe and metadata
+  stripping. 150 MB PDF limit (3× the image limit), native Open With on macOS, demo sample
+  on the home screen.
+
 **Platform**
 
 - Native macOS app, built with Tauri 2 on WKWebView. The same web bundle runs in a native

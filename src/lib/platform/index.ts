@@ -121,6 +121,7 @@ const FILTER_LABELS: Readonly<Record<string, string>> = {
   jpg: 'JPEG',
   json: 'JSON',
   jxl: 'JPEG XL',
+  pdf: 'PDF',
   png: 'PNG',
   qoi: 'QOI',
   svg: 'SVG',

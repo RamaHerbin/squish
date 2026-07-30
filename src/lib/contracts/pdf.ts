@@ -24,6 +24,17 @@
 export const PDF_MIME_TYPE = 'application/pdf';
 
 /**
+ * Is this a PDF? The single test every intake path shares.
+ *
+ * The extension fallback is not belt-and-braces: a file handed over by Tauri is
+ * rebuilt from bytes on the JS side and carries `type: ''`, so on the native
+ * path the name is the only signal there is.
+ */
+export function looksLikePdf(file: { name: string; type: string }): boolean {
+  return file.type === PDF_MIME_TYPE || /\.pdf$/i.test(file.name);
+}
+
+/**
  * Accept string for a file picker that should take PDFs.
  *
  * Separate from `FILE_PICKER_ACCEPT`, which hardcodes `image/*`. Callers that
