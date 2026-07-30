@@ -10,9 +10,9 @@
    * - `editor` — bordered cells: brand | tab strip (+ add) | nav links.
    *   This is the only view with a tab strip, because it is the only one
    *   `TabsApi` actually drives.
-   * - `matrix` / `queue` / `settings` — a single flush row: brand (no dot) +
-   *   `contextTitle`, a spacer, then either nav links (queue) or one action
-   *   (Close × on matrix, Done on settings).
+   * - `matrix` / `queue` / `settings` / `pdf` — a single flush row: brand (no
+   *   dot) + `contextTitle`, a spacer, then either nav links (queue) or one
+   *   action (Close × on matrix and pdf, Done on settings).
    *
    * Below 640px both collapse into the same three-cell mobile bar from comp
    * 06: back/brand on the left, a title in the middle, one action on the
@@ -22,15 +22,22 @@
    * owns `view` and reacts to `onnavigate`/`onbrand`/`onback`.
    */
   import type { AppView, TabsApi } from '../contracts';
-  import { FILE_PICKER_ACCEPT } from '../contracts';
+  import { FILE_PICKER_ACCEPT, PDF_FILE_PICKER_ACCEPT } from '../contracts';
   import { BrandDot } from '../ui';
+
+  /**
+   * This bar's own picker takes both kinds: the shell routes a picked PDF to
+   * the PDF screen rather than opening it as a tab, so greying PDFs out here
+   * would hide a path that works.
+   */
+  const PICKER_ACCEPT = `${FILE_PICKER_ACCEPT},${PDF_FILE_PICKER_ACCEPT}`;
 
   interface Props {
     /** Current top-level screen. Drives which bar renders. */
     view: AppView;
     /** Tab strip data, `editor` view only. Omit for a `+`-only bar. */
     tabs?: TabsApi;
-    /** "Matrix — art.jpg" / "Queue" / "Settings" next to the brand mark. */
+    /** "Matrix — art.jpg" / "Queue" / "Settings" / a PDF's name, next to the brand mark. */
     contextTitle?: string;
     /** Mobile queue title: `QUEUE · {queueCount}`. The batch queue's file count — unrelated to `tabs`. */
     queueCount?: number;
@@ -44,7 +51,7 @@
     onmenu?: () => void;
     /** Files picked from the "+"/"Add" file input. */
     onaddfile?: (files: FileList) => void;
-    /** Matrix's "Close ×". Defaults to `onnavigate?.('editor')`. */
+    /** The "Close ×" on matrix and pdf. Defaults to `onnavigate?.('editor')`. */
     onclose?: () => void;
     /** Settings' "Done". Defaults to `onnavigate?.('editor')`. */
     ondone?: () => void;
@@ -64,7 +71,10 @@
     ondone,
   }: Props = $props();
 
-  /** Canonical order; the current view is filtered out of whatever renders. */
+  /**
+   * Canonical order; the current view is filtered out of whatever renders.
+   * `pdf` is absent on purpose — it is reachable by intake only, never by a link.
+   */
   const NAV_ORDER: readonly AppView[] = ['editor', 'matrix', 'queue', 'settings'];
   const VIEW_LABEL: Readonly<Record<AppView, string>> = {
     home: 'Home',
@@ -72,6 +82,7 @@
     matrix: 'Matrix',
     queue: 'Queue',
     settings: 'Settings',
+    pdf: 'PDF',
   };
 
   const navLinks = $derived(NAV_ORDER.filter((v) => v !== view));
@@ -125,6 +136,7 @@
     if (view === 'queue') return `Queue · ${queueCount ?? 0}`;
     if (view === 'matrix') return contextTitle ?? 'Matrix';
     if (view === 'settings') return 'Settings';
+    if (view === 'pdf') return contextTitle ?? 'PDF';
     return '';
   });
 
@@ -136,7 +148,7 @@
   const mobileAction = $derived.by((): MobileAction => {
     if (view === 'editor') return { label: 'Matrix', onClick: () => onnavigate?.('matrix') };
     if (view === 'queue') return { label: 'Add', onClick: openFilePicker };
-    if (view === 'matrix') return { label: 'Close ×', onClick: handleClose };
+    if (view === 'matrix' || view === 'pdf') return { label: 'Close ×', onClick: handleClose };
     if (view === 'settings') return { label: 'Done', onClick: handleDone };
     return { label: '', onClick: () => {} };
   });
@@ -146,7 +158,7 @@
   <input
     bind:this={fileInput}
     type="file"
-    accept={FILE_PICKER_ACCEPT}
+    accept={PICKER_ACCEPT}
     multiple
     class="file-input"
     tabindex="-1"
@@ -203,7 +215,7 @@
         {/each}
       </nav>
     </div>
-  {:else if view === 'matrix' || view === 'queue' || view === 'settings'}
+  {:else if view === 'matrix' || view === 'queue' || view === 'settings' || view === 'pdf'}
     <div class="bar bar--flush">
       <div class="flush-left">
         <button type="button" class="brand-plain" onclick={handleBrand} aria-label="Pinch — back to home">
@@ -222,7 +234,7 @@
             </button>
           {/each}
         </nav>
-      {:else if view === 'matrix'}
+      {:else if view === 'matrix' || view === 'pdf'}
         <button type="button" class="nav-link" onclick={handleClose}>Close ×</button>
       {:else}
         <button type="button" class="nav-link" onclick={handleDone}>Done</button>

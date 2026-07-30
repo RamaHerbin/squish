@@ -70,6 +70,12 @@
           "svg",
           "gif"
         ]
+      },
+      {
+        "name": "PDF",
+        "description": "PDF",
+        "role": "Viewer",
+        "ext": ["pdf"]
       }
     ]
   }

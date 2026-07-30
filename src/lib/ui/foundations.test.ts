@@ -95,8 +95,8 @@ describe('savingsPct', () => {
 });
 
 describe('app views & settings', () => {
-  it('recognises exactly the five screens', () => {
-    expect(APP_VIEWS).toHaveLength(5);
+  it('recognises exactly the six screens', () => {
+    expect(APP_VIEWS).toHaveLength(6);
     for (const view of APP_VIEWS) expect(isAppView(view)).toBe(true);
     expect(isAppView('intro')).toBe(false);
     expect(isAppView(42)).toBe(false);
