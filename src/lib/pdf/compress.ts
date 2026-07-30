@@ -17,7 +17,7 @@
 
 import { PDFDocument, PDFRawStream, PDFRef } from '@cantoo/pdf-lib';
 
-import { createWorkerBridge } from '../codecs/bridge';
+import { createWorkerBridge } from '../codecs';
 import { DEFAULT_ENCODER_OPTIONS, isAbortError } from '../contracts';
 import type {
   PdfCompressResult,
@@ -26,7 +26,7 @@ import type {
   PdfImageOutcome,
   WorkerBridgeApi,
 } from '../contracts';
-import { measureSsim } from '../metrics/ssim';
+import { measureSsim } from '../metrics';
 
 import { analyzePdf } from './analyze';
 import { decodePdfImageData, resampleImageData, type PdfDecodeDeps } from './decode';

@@ -25,7 +25,7 @@
 
 import { PDFName, PDFNumber, PDFRawStream, PDFRef, decodePDFRawStream } from '@cantoo/pdf-lib';
 
-import { builtinResize } from '../codecs/canvas';
+import { builtinResize } from '../codecs';
 import type { PdfImageInfo, WorkerBridgeApi } from '../contracts';
 
 /** Interned name keys, looked up once. `PDFName.of` pools, so this is cheap. */

@@ -25,6 +25,7 @@
 import {
   EXTENSION_BY_MIME,
   MIME_SNIFF_BYTES,
+  PDF_NOT_AN_IMAGE_MESSAGE,
   abortable,
   assertSignal,
   isAbortError,
@@ -272,7 +273,7 @@ export async function decodeBlob(
   const sniffed = await abortable(signal, sniffMimeType(blob, filename));
 
   if (sniffed.unsupported === 'application/pdf') {
-    throw new Error('PDFs are not images — export a page as PNG or JPEG first');
+    throw new Error(PDF_NOT_AN_IMAGE_MESSAGE);
   }
 
   const mimeType = sniffed.mimeType;

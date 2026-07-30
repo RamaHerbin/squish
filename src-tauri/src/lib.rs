@@ -122,6 +122,23 @@ fn pinch_frontend_ready(app: AppHandle, state: tauri::State<'_, OpenedFilesState
 /// is rejected from metadata alone instead of being read into memory first.
 const MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
 
+/// Mirrors `PDF_MAX_FILE_BYTES` in `src/lib/contracts/pdf.ts`;
+/// `src/lib/contracts/pdf.test.ts` binds the two.
+const MAX_PDF_READ_BYTES: u64 = 150 * 1024 * 1024;
+
+/// Per-file read ceiling for a path, by extension: PDFs get the larger
+/// [`MAX_PDF_READ_BYTES`], everything else the image-oriented [`MAX_READ_BYTES`].
+fn max_read_bytes(path: &std::path::Path) -> u64 {
+    let is_pdf = path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"));
+    if is_pdf {
+        MAX_PDF_READ_BYTES
+    } else {
+        MAX_READ_BYTES
+    }
+}
+
 /// Canonicalise a requested path and check it against the opened-files
 /// whitelist. Symlinks and `/tmp` vs `/private/tmp` cannot dodge or fake
 /// authorisation because both sides of the comparison are canonical.
@@ -140,7 +157,7 @@ fn authorized_path(
 /// Hand the bytes of an opened file to the frontend.
 ///
 /// Serves only whitelisted paths (see [`authorized_path`]), refuses anything
-/// over [`MAX_READ_BYTES`] before reading a single byte, and returns raw bytes
+/// over [`max_read_bytes`] before reading a single byte, and returns raw bytes
 /// ([`tauri::ipc::Response`]) so a 40 MB HEIC does not crawl through JSON.
 /// `async` keeps the read off the IPC thread.
 #[tauri::command]
@@ -151,8 +168,12 @@ async fn read_opened_file(
     let requested = authorized_path(&state, &path)?;
     let meta = std::fs::metadata(&requested)
         .map_err(|error| format!("cannot stat {path}: {error}"))?;
-    if meta.len() > MAX_READ_BYTES {
-        return Err(format!("{path} is over the 50 MB per-file limit"));
+    let limit = max_read_bytes(&requested);
+    if meta.len() > limit {
+        return Err(format!(
+            "{path} is over the {} MB per-file limit",
+            limit / (1024 * 1024)
+        ));
     }
     let bytes =
         std::fs::read(&requested).map_err(|error| format!("cannot read {path}: {error}"))?;

@@ -4,8 +4,8 @@
    *
    * Owns the four things nothing else can:
    *
-   * 1. **The router.** One {@link AppView} over the five comps: home, editor,
-   *    matrix, queue, settings.
+   * 1. **The router.** One {@link AppView} over the five comps — home, editor,
+   *    matrix, queue, settings — plus `pdf`, which has no comp and no tab.
    * 2. **The tab strip.** Each tab owns its own `JobSession`, so switching
    *    images never re-decodes and a background encode keeps running.
    * 3. **The start-up handshake.** Persisted settings → shared preset from the
@@ -25,10 +25,13 @@
   } from './lib/contracts';
   import {
     FILE_PICKER_ACCEPT,
+    PDF_FILE_PICKER_ACCEPT,
+    PDF_MAX_FILE_BYTES,
     PRESET_URL_PARAM,
     cloneSideSettings,
     createDefaultSideSettings,
     createSideSettings,
+    looksLikePdf,
     partitionBySize,
     withEncoder,
   } from './lib/contracts';
@@ -55,6 +58,7 @@
   import HomeView from './lib/home/HomeView.svelte';
   import EditorView from './lib/EditorView.svelte';
   import { MatrixView } from './lib/matrix';
+  import { PdfView } from './lib/pdf';
   import QueueView from './lib/batch/QueueView.svelte';
   import SettingsView from './lib/settings/SettingsView.svelte';
   import { appSettings } from './lib/settings/settings.svelte';
@@ -175,6 +179,13 @@
   let settingsSection = $state<SettingsSectionId>('defaults');
   let starting = $state(true);
 
+  /**
+   * The one PDF being worked on. Not a tab: a PDF has no `SideSettings`, no
+   * `ImageData` and nothing to compare, so it gets its own screen and exactly
+   * one slot. Opening another replaces it.
+   */
+  let pdfFile = $state<File | undefined>(undefined);
+
   function go(next: AppView): void {
     shellError = undefined;
     // The editor has nothing to show without a tab; the matrix needs one too.
@@ -182,8 +193,17 @@
       view = 'home';
       return;
     }
+    if (next === 'pdf' && !pdfFile) {
+      view = 'home';
+      return;
+    }
     if (next === 'settings' && view !== 'settings') returnView = view;
     view = next;
+  }
+
+  function closePdf(): void {
+    pdfFile = undefined;
+    go('home');
   }
 
   function openSettings(section: SettingsSectionId): void {
@@ -208,35 +228,86 @@
     return { images: accepted, skippedNote: `Skipped (over 50 MB): ${names}` };
   }
 
+  /** Two independent facts about one drop, in one line of error bar. */
+  function joinNotes(...notes: readonly (string | undefined)[]): string | undefined {
+    const real = notes.filter((note): note is string => note !== undefined);
+    return real.length > 0 ? real.join(' · ') : undefined;
+  }
+
+  /**
+   * What the PDF triage decided. `handled` means the PDF screen took the drop
+   * and already set `shellError`; otherwise `files` is what the image flow
+   * should carry on with, minus any PDF that was set aside.
+   */
+  type PdfRoute =
+    | { readonly handled: true }
+    | { readonly handled: false; readonly files: readonly File[]; readonly note?: string };
+
+  /**
+   * PDF triage, ahead of every image path.
+   *
+   * A drop is read as *either* a PDF job or an image job — never both, because
+   * the two have no screen in common and a PDF never becomes a tab. A drop with
+   * no PDF in it falls through untouched, which is what keeps the image flow
+   * exactly as it was.
+   */
+  function routePdfs(files: readonly File[]): PdfRoute {
+    const pdfs = files.filter((f) => looksLikePdf(f));
+    if (pdfs.length === 0) return { handled: false, files };
+
+    const rest = files.filter((f) => !looksLikePdf(f));
+    if (rest.length > 0) {
+      // Mixed: the images are almost always the intent, so they win the screen
+      // and the PDF gets an explanation rather than silence.
+      return { handled: false, files: rest, note: 'Drop a PDF on its own to compress it.' };
+    }
+
+    const first = pdfs[0];
+    if (!first) return { handled: false, files };
+    if (first.size > PDF_MAX_FILE_BYTES) {
+      shellError = `Skipped (over 150 MB): ${first.name}`;
+      return { handled: true };
+    }
+    pdfFile = first;
+    view = 'pdf';
+    shellError = pdfs.length > 1 ? 'One PDF at a time — opened the first.' : undefined;
+    return { handled: true };
+  }
+
   /** Every file becomes a tab. Used by the header `+` and the share target. */
   function openInEditor(files: readonly File[]): void {
-    const { images, skippedNote } = imagesOf(files);
+    const route = routePdfs(files);
+    if (route.handled) return;
+    const { images, skippedNote } = imagesOf(route.files);
+    const note = joinNotes(route.note, skippedNote);
     if (images.length === 0) {
       shellError =
-        skippedNote ??
-        (files.length > 0 ? 'That file is not an image Pinch can read.' : undefined);
+        note ?? (route.files.length > 0 ? 'That file is not an image Pinch can read.' : undefined);
       return;
     }
-    shellError = skippedNote;
+    shellError = note;
     tabs.openMany(images);
     view = 'editor';
   }
 
   /** The home drop zone: one image is an editing session, several is a queue. */
   function handleHomeFiles(files: readonly File[]): void {
-    const { images, skippedNote } = imagesOf(files);
+    const route = routePdfs(files);
+    if (route.handled) return;
+    const { images, skippedNote } = imagesOf(route.files);
+    const note = joinNotes(route.note, skippedNote);
     if (images.length === 0) {
       shellError =
-        skippedNote ?? (files.length > 0 ? 'No readable images in that drop.' : undefined);
+        note ?? (route.files.length > 0 ? 'No readable images in that drop.' : undefined);
       return;
     }
     if (images.length === 1) {
-      shellError = skippedNote;
+      shellError = note;
       tabs.openMany(images);
       view = 'editor';
       return;
     }
-    shellError = skippedNote;
+    shellError = note;
     ensureQueue().add(images);
     view = 'queue';
   }
@@ -247,11 +318,15 @@
 
   /**
    * `HomeView` owns the whole page while it is mounted and `QueueView` brings
-   * its own document-level handlers, so these only cover the editor, matrix and
-   * settings screens — where the browser default (navigate away to the dropped
-   * file) is the single most destructive thing that can happen to unsaved work.
+   * its own document-level handlers, so these only cover the editor, matrix,
+   * settings and pdf screens — where the browser default (navigate away to the
+   * dropped file) is the single most destructive thing that can happen to
+   * unsaved work. On the PDF screen a dropped PDF routes like any other, which
+   * is how it replaces the job in place.
    */
-  const windowDropTarget = $derived(view === 'editor' || view === 'matrix' || view === 'settings');
+  const windowDropTarget = $derived(
+    view === 'editor' || view === 'matrix' || view === 'settings' || view === 'pdf',
+  );
 
   function onWindowDragOver(event: DragEvent): void {
     if (!windowDropTarget) return;
@@ -287,6 +362,9 @@
   }
 
   let filePicker = $state<HTMLInputElement | undefined>(undefined);
+
+  /** Images *and* PDFs: `routePdfs` sends whichever arrives to the right screen. */
+  const PICKER_ACCEPT = `${FILE_PICKER_ACCEPT},${PDF_FILE_PICKER_ACCEPT}`;
 
   function onPickerChange(event: Event): void {
     const input = event.currentTarget as HTMLInputElement;
@@ -464,7 +542,7 @@
   <input
     bind:this={filePicker}
     type="file"
-    accept={FILE_PICKER_ACCEPT}
+    accept={PICKER_ACCEPT}
     multiple
     class="file-picker"
     tabindex="-1"
@@ -513,12 +591,15 @@
         ? 'Queue'
         : view === 'settings'
           ? 'Settings'
-          : undefined}
+          : view === 'pdf'
+            ? pdfFile?.name
+            : undefined}
     queueCount={queue?.items.length}
     onnavigate={go}
     onbrand={() => go('home')}
     onmenu={() => openSettings('defaults')}
     onaddfile={(files) => openInEditor(Array.from(files))}
+    onclose={view === 'pdf' ? closePdf : undefined}
     ondone={() => go(returnView === 'settings' ? 'home' : returnView)}
   />
 
@@ -581,6 +662,21 @@
         />
       {:else}
         <section class="placeholder"><p class="placeholder-text">Preparing the queue…</p></section>
+      {/if}
+    {:else if view === 'pdf'}
+      {#if pdfFile}
+        <!-- Keyed on the file itself: dropping another PDF here is a new job,
+             not a re-analysis of the old one. -->
+        {#key pdfFile}
+          <PdfView file={pdfFile} onclose={closePdf} />
+        {/key}
+      {:else}
+        <section class="placeholder">
+          <p class="placeholder-text">No PDF open yet.</p>
+          <PillButton variant="solid" size={38} font="body" onclick={() => go('home')}>
+            Choose a PDF
+          </PillButton>
+        </section>
       {/if}
     {:else}
       <SettingsView

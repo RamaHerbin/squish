@@ -28,11 +28,14 @@ import type { SideSettings } from './processing';
  * - `matrix`   — 03, every encoder × quality for the active tab
  * - `queue`    — 04, batch encode
  * - `settings` — 05
+ * - `pdf`      — no comp: one PDF, analysis + recompress. Has no tab and no
+ *   nav link, because a PDF is not an image and never joins the tab strip; the
+ *   only way in is dropping/picking a PDF, and the only way out is its Close ×.
  *
  * Distinct from the legacy `AppMode` in `./index.ts`, which only knew
  * intro/editor/batch.
  */
-export type AppView = 'home' | 'editor' | 'matrix' | 'queue' | 'settings';
+export type AppView = 'home' | 'editor' | 'matrix' | 'queue' | 'settings' | 'pdf';
 
 export const APP_VIEWS: readonly AppView[] = [
   'home',
@@ -40,13 +43,18 @@ export const APP_VIEWS: readonly AppView[] = [
   'matrix',
   'queue',
   'settings',
+  'pdf',
 ];
 
 export function isAppView(value: unknown): value is AppView {
   return typeof value === 'string' && (APP_VIEWS as readonly string[]).includes(value);
 }
 
-/** The views reachable from the top bar once at least one tab is open. */
+/**
+ * The views reachable from the top bar once at least one tab is open.
+ * Deliberately shorter than {@link APP_VIEWS}: `pdf` is entered by file intake
+ * only, so putting it in the nav would offer a screen with nothing to show.
+ */
 export const NAV_VIEWS: readonly AppView[] = ['matrix', 'queue', 'settings'];
 
 /* -------------------------------------------------------------------------- */
