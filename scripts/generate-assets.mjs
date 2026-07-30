@@ -17,15 +17,16 @@
  *   node scripts/generate-assets.mjs icons og     # a subset
  *
  * Targets: `icons` (+ favicon), `macos` (the Tauri app icon), `og`, `demo`,
- * `hdr`, `shots`. `shots` boots `vite` on a free port and drives the real app,
- * so it is the slow one; the rest are pure rendering and take a couple of
- * seconds.
+ * `pdf`, `hdr`, `shots`. `shots` boots `vite` on a free port and drives the
+ * real app, so it is the slow one; the rest are pure rendering and take a
+ * couple of seconds.
  *
  * `macos` and `hdr` are opt-in and excluded from a bare, argument-less run:
  * they shell out to `iconutil` (macOS only) and `avifenc` (libavif, not an npm
  * dependency), so they must be named explicitly rather than breaking the
  * default "everything" run for a contributor who has just cloned and run
- * `npm install`.
+ * `npm install`. `pdf` needs neither — `@cantoo/pdf-lib` is already a runtime
+ * dependency — so it is part of the default run.
  *
  * Outputs (all overwritten in place, all committed):
  *   public/icons/icon-192.png          192×192   from icon.svg
@@ -40,6 +41,7 @@
  *   public/og.png                      1200×630  social card
  *   public/demo/demo-gradient.jpg      1600×1200 duotone gradient, JPEG q0.86
  *   public/demo/demo-poster.png        1200×900  geometric poster, PNG
+ *   public/demo/demo-report.pdf        2 pages   demo-gradient.jpg + demo-poster.png, oversized
  *   public/demo/demo-hdr.avif          1600×1200 the same sheet, 10-bit PQ
  *   docs/media/home.png                1440×1010 app screenshot
  *   docs/media/editor.png              1440×900  app screenshot
@@ -54,6 +56,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { chromium } from 'playwright-core';
+import { PDFDocument, PageSizes, StandardFonts } from '@cantoo/pdf-lib';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const p = (...segments) => path.join(ROOT, ...segments);
@@ -813,7 +816,97 @@ async function buildDemos(browser, fonts) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* 4. HDR demo raster                                                          */
+/* 4. Demo PDF report                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `demo-report.pdf` — a two-page "report" that gives the PDF compression
+ * feature something real to chew on, built from the two rasters `buildDemos`
+ * just wrote rather than painted fresh, so the PDF and image samples are
+ * visibly the same series.
+ *
+ * Page 1 embeds `demo-gradient.jpg` as-is: pdf-lib copies a JPEG's bytes
+ * straight into a `DCTDecode` stream without re-encoding, so this exercises
+ * that path unchanged. Page 2 embeds `demo-poster.png`; pdf-lib has no PNG
+ * passthrough — it decodes to raw samples and re-deflates them — so this
+ * embeds as `FlateDecode`, the other filter the feature can recompress. Both
+ * are drawn about 5 inches wide (`DRAW_WIDTH_PT`) against source raster sizes
+ * (1600×1200, 1200×900) more than three times that on the long edge, so each
+ * lands north of 300 effective DPI — comfortably above
+ * `DEFAULT_PDF_SETTINGS.targetDpi` (150), so the default compress run visibly
+ * resamples both images rather than leaving them untouched.
+ *
+ * Determinism matters here as much as for the rasters (see the module doc):
+ * title/author/creator/producer and both dates are pinned rather than left to
+ * pdf-lib's defaults (which stamp the actual run time), and the save uses
+ * `useObjectStreams: false` — pdf-lib's packed object streams have been
+ * observed to reorder between otherwise-identical runs, which a plain
+ * cross-reference table does not.
+ *
+ * Size budget: the JPEG passes through unchanged (141 KB) but the PNG does
+ * not — `PngEmbedder` decodes it to raw RGB and re-deflates that, and on a
+ * mostly-flat poster raw-sample deflate beats the source PNG's own filtered
+ * IDAT stream, landing near 30 KB instead of the source file's 58 KB. Measured
+ * total is ~170 KB; the budget below is generous around that, not the 400-700
+ * KB a naive byte-for-byte estimate would suggest.
+ */
+const PDF_DRAW_WIDTH_PT = 360; // 5in at 72pt/in
+const PDF_FIXED_DATE = new Date('2026-01-01T00:00:00Z');
+
+async function buildPdfReport() {
+  console.log('pdf');
+  const [gradientJpg, posterPng] = await Promise.all([
+    fs.readFile(p('public/demo/demo-gradient.jpg')),
+    fs.readFile(p('public/demo/demo-poster.png')),
+  ]);
+
+  const pdfDoc = await PDFDocument.create();
+  pdfDoc.setTitle('Pinch Demo Report');
+  pdfDoc.setAuthor('Pinch');
+  pdfDoc.setCreator('Pinch demo asset generator');
+  pdfDoc.setProducer('Pinch');
+  pdfDoc.setCreationDate(PDF_FIXED_DATE);
+  pdfDoc.setModificationDate(PDF_FIXED_DATE);
+
+  const caption = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+  const drawFigure = async (image, label) => {
+    const page = pdfDoc.addPage(PageSizes.Letter);
+    const { width: pageWidth, height: pageHeight } = page.getSize();
+    const drawWidth = PDF_DRAW_WIDTH_PT;
+    const drawHeight = drawWidth * (image.height / image.width);
+    const x = (pageWidth - drawWidth) / 2;
+    const y = pageHeight - drawHeight - 144;
+    page.drawImage(image, { x, y, width: drawWidth, height: drawHeight });
+    page.setFont(caption);
+    page.setFontSize(10);
+    page.drawText('Pinch Demo Report', { x: 72, y: pageHeight - 72 });
+    page.drawText(label, { x: 72, y: y - 24 });
+    return page;
+  };
+
+  const gradientImage = await pdfDoc.embedJpg(gradientJpg);
+  await drawFigure(gradientImage, 'Figure 1. Duotone gradient, embedded as JPEG (DCTDecode).');
+
+  const posterImage = await pdfDoc.embedPng(posterPng);
+  await drawFigure(posterImage, 'Figure 2. Flat geometric poster, embedded as PNG (FlateDecode).');
+
+  const bytes = Buffer.from(await pdfDoc.save({ useObjectStreams: false }));
+  const file = p('public/demo/demo-report.pdf');
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, bytes);
+  record(file, bytes, null, `${pdfDoc.getPageCount()} pages`);
+
+  const kb = bytes.length / 1024;
+  if (kb < 120 || kb > 300) {
+    throw new Error(
+      `${path.relative(ROOT, file)}: ${kb.toFixed(1)} KB outside the expected 120-300 KB budget`,
+    );
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* 5. HDR demo raster                                                          */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -1033,7 +1126,7 @@ async function buildHdr(browser, fonts) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* 5. Documentation screenshots                                                */
+/* 6. Documentation screenshots                                                */
 /* -------------------------------------------------------------------------- */
 
 async function findFreePort(start = 4590, tries = 80) {
@@ -1152,12 +1245,12 @@ async function buildScreenshots(browser) {
 /* Entry point                                                                 */
 /* -------------------------------------------------------------------------- */
 
-const ALL = ['icons', 'macos', 'og', 'demo', 'hdr', 'shots'];
+const ALL = ['icons', 'macos', 'og', 'demo', 'pdf', 'hdr', 'shots'];
 // `macos` shells out to `iconutil` (macOS-only) and `hdr` to `avifenc`
 // (libavif, not an npm dependency). Both are opt-in: a bare, argument-less run
 // must keep working for contributors on any platform with nothing but
 // `npm install`, so they stay out of the implied "everything" set and have to
-// be named explicitly.
+// be named explicitly. `pdf` needs neither, so it is not opt-in.
 const OPT_IN = ['macos', 'hdr'];
 const DEFAULT = ALL.filter((target) => !OPT_IN.includes(target));
 const requested = process.argv.slice(2).filter((arg) => !arg.startsWith('-'));
@@ -1168,17 +1261,34 @@ if (unknown.length) {
   process.exit(1);
 }
 
-const browser = await chromium.launch({ executablePath: chromeExecutable(), headless: true });
+// `pdf` reads the rasters `demo` writes, so when both are requested `demo`
+// must run first.
+if (targets.includes('pdf') && !targets.includes('demo')) {
+  await fs.access(p('public/demo/demo-gradient.jpg')).catch(() => {
+    throw new Error('pdf target needs public/demo/demo-gradient.jpg — run `demo` first (or with no args).');
+  });
+}
+
+// Every target except `pdf` renders through headless Chrome; skip the launch
+// (and the `CHROME_PATH` requirement that comes with it) when it is the only
+// thing requested — `node scripts/generate-assets.mjs pdf` should not need a
+// browser installed to touch pdf-lib.
+const CHROME_TARGETS = ['icons', 'macos', 'og', 'demo', 'hdr', 'shots'];
+const needsBrowser = targets.some((target) => CHROME_TARGETS.includes(target));
+const browser = needsBrowser
+  ? await chromium.launch({ executablePath: chromeExecutable(), headless: true })
+  : null;
 try {
-  const fonts = await fontFaceCss();
+  const fonts = needsBrowser ? await fontFaceCss() : null;
   if (targets.includes('icons')) await buildIcons(browser);
   if (targets.includes('macos')) await buildMacosIcons(browser);
   if (targets.includes('og')) await buildOg(browser, fonts);
   if (targets.includes('demo')) await buildDemos(browser, fonts);
+  if (targets.includes('pdf')) await buildPdfReport();
   if (targets.includes('hdr')) await buildHdr(browser, fonts);
   if (targets.includes('shots')) await buildScreenshots(browser);
 } finally {
-  await browser.close();
+  if (browser) await browser.close();
 }
 
 const total = report.reduce((sum, entry) => sum + entry.bytes, 0);

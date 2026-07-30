@@ -29,6 +29,8 @@ const KEY = {
   ColorSpace: PDFName.of('ColorSpace'),
   Filter: PDFName.of('Filter'),
   SMask: PDFName.of('SMask'),
+  Mask: PDFName.of('Mask'),
+  Decode: PDFName.of('Decode'),
   Resources: PDFName.of('Resources'),
   XObject: PDFName.of('XObject'),
   Metadata: PDFName.of('Metadata'),
@@ -171,6 +173,11 @@ export function stripMetadata(doc: PDFDocument): void {
  * candidates are still byte-compared before merging — the hash narrows, it never
  * proves. Reads dimensions/filter/colour space off the dict as raw names so an
  * `/Indexed` array vs a bare `/DeviceRGB` never share a bucket by accident.
+ *
+ * The transparency and sample-mapping keys are part of the signature because
+ * identical planes are not identical images: two copies of one logo behind
+ * different `/SMask` objects, or one with an inverted `/Decode`, render
+ * differently, and collapsing them would repaint the document.
  */
 function bucketKey(dict: PDFDict, contents: Uint8Array): string {
   const w = nameOrNum(dict, KEY.Width);
@@ -178,7 +185,10 @@ function bucketKey(dict: PDFDict, contents: Uint8Array): string {
   const bpc = nameOrNum(dict, KEY.BitsPerComponent);
   const cs = nameString(dict, KEY.ColorSpace);
   const filter = nameString(dict, KEY.Filter);
-  return `${w}:${h}:${bpc}:${cs}:${filter}:${contents.length}:${fnv1a(contents)}`;
+  const smask = refOrValue(dict, KEY.SMask);
+  const mask = refOrValue(dict, KEY.Mask);
+  const decode = refOrValue(dict, KEY.Decode);
+  return `${w}:${h}:${bpc}:${cs}:${filter}:${smask}:${mask}:${decode}:${contents.length}:${fnv1a(contents)}`;
 }
 
 /** 32-bit FNV-1a as an unsigned decimal string. Bucket key only, never a proof. */
@@ -207,6 +217,18 @@ function nameString(dict: PDFDict, key: PDFName): string {
 /** The object's `toString()` at `key`, or `'x'` — covers PDFNumber dimensions. */
 function nameOrNum(dict: PDFDict, key: PDFName): string {
   const value = dict.get(key);
+  return value ? value.toString() : 'x';
+}
+
+/**
+ * Identity of `key` without resolving it: a ref prints as its tag, anything else
+ * as itself. `get` (not `lookup`) is deliberate — two images pointing at two
+ * distinct soft-mask objects must differ here even when those masks happen to
+ * hold identical bytes.
+ */
+function refOrValue(dict: PDFDict, key: PDFName): string {
+  const value = dict.get(key);
+  if (value instanceof PDFRef) return value.tag;
   return value ? value.toString() : 'x';
 }
 

@@ -24,6 +24,17 @@
 export const PDF_MIME_TYPE = 'application/pdf';
 
 /**
+ * Is this a PDF? The single test every intake path shares.
+ *
+ * The extension fallback is not belt-and-braces: a file handed over by Tauri is
+ * rebuilt from bytes on the JS side and carries `type: ''`, so on the native
+ * path the name is the only signal there is.
+ */
+export function looksLikePdf(file: { name: string; type: string }): boolean {
+  return file.type === PDF_MIME_TYPE || /\.pdf$/i.test(file.name);
+}
+
+/**
  * Accept string for a file picker that should take PDFs.
  *
  * Separate from `FILE_PICKER_ACCEPT`, which hardcodes `image/*`. Callers that
@@ -107,6 +118,12 @@ export interface PdfImageInfo {
   readonly hasSMask: boolean;
   /** True for `/ImageMask` stencils. */
   readonly isMask: boolean;
+  /**
+   * True when `/Decode` remaps sample values away from the identity, e.g. the
+   * inverted grayscale `[1 0]`. Neither decode path applies the mapping and
+   * `replaceImageStream` drops the key, so these are left alone.
+   */
+  readonly hasCustomDecode: boolean;
   /** Bytes of the encoded stream as stored. */
   readonly srcBytes: number;
   /**

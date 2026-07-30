@@ -17,8 +17,8 @@
 
 import { PDFDocument, PDFRawStream, PDFRef } from '@cantoo/pdf-lib';
 
-import { createWorkerBridge } from '../codecs/bridge';
-import { DEFAULT_ENCODER_OPTIONS, isAbortError } from '../contracts';
+import { createWorkerBridge } from '../codecs';
+import { DEFAULT_ENCODER_OPTIONS, MozJpegColorSpace, isAbortError } from '../contracts';
 import type {
   PdfCompressResult,
   PdfCompressSettings,
@@ -26,7 +26,7 @@ import type {
   PdfImageOutcome,
   WorkerBridgeApi,
 } from '../contracts';
-import { measureSsim } from '../metrics/ssim';
+import { measureSsim } from '../metrics';
 
 import { analyzePdf } from './analyze';
 import { decodePdfImageData, resampleImageData, type PdfDecodeDeps } from './decode';
@@ -133,16 +133,22 @@ export async function compressPdf(
         const target = resampleTarget(info, settings);
         if (target) image = resample(image, target);
 
+        // A grayscale source is written back as `/DeviceGray`, i.e. one colour
+        // component. The encoder has to agree: the YCbCr default would produce a
+        // three-component JPEG behind a one-component dict, which viewers render
+        // wrong or refuse outright.
+        const gray = info.colorSpace === '/DeviceGray';
         const encoded = await bridge.encode(signal, 'mozjpeg', image, {
           ...DEFAULT_ENCODER_OPTIONS.mozjpeg,
           quality: settings.imageQuality,
+          ...(gray ? { color_space: MozJpegColorSpace.GRAYSCALE } : {}),
         });
 
         if (encoded.byteLength < info.srcBytes) {
           replaceImageStream(doc, ref, new Uint8Array(encoded), {
             width: image.width,
             height: image.height,
-            colorSpace: info.colorSpace === '/DeviceGray' ? 'DeviceGray' : 'DeviceRGB',
+            colorSpace: gray ? 'DeviceGray' : 'DeviceRGB',
           });
 
           // `encode` structured-clones its input, so `image` is still live for a

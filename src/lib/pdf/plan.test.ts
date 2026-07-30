@@ -16,6 +16,7 @@ const img = (over: Partial<PdfImageInfo> = {}): PdfImageInfo => ({
   bitsPerComponent: 8,
   hasSMask: false,
   isMask: false,
+  hasCustomDecode: false,
   srcBytes: 10_000,
   ...over,
 });
@@ -50,6 +51,14 @@ describe('imageSkipReason', () => {
   it('skips colour spaces other than the two device families', () => {
     expect(imageSkipReason(img({ colorSpace: '/Indexed' }), DEFAULT_PDF_SETTINGS)).toBe('colorspace');
     expect(imageSkipReason(img({ colorSpace: '/ICCBased' }), DEFAULT_PDF_SETTINGS)).toBe('colorspace');
+  });
+
+  it('skips an image whose /Decode remaps samples', () => {
+    // No decode path applies /Decode and replaceImageStream drops it, so an
+    // inverted grayscale plane would come back inverted.
+    expect(imageSkipReason(img({ hasCustomDecode: true }), DEFAULT_PDF_SETTINGS)).toBe(
+      'colorspace',
+    );
   });
 
   it('skips images below the byte floor', () => {
@@ -113,6 +122,18 @@ describe('resampleTarget', () => {
     expect(
       resampleTarget(img({ width: 4800, height: 2400 }), { ...DEFAULT_PDF_SETTINGS, maxPixels: 2400 }),
     ).toEqual({ width: 2400, height: 1200 });
+  });
+
+  it('leaves an unplaced image alone when both the DPI target and the cap are cleared', () => {
+    // What the rail's "Keep" segment sends: no DPI target *and* no fallback cap,
+    // so an image the walker could not place is genuinely kept at its stored size.
+    expect(
+      resampleTarget(img({ width: 4800, height: 2400 }), {
+        ...DEFAULT_PDF_SETTINGS,
+        targetDpi: null,
+        maxPixels: null,
+      }),
+    ).toBeNull();
   });
 
   it('leaves an unplaced image alone under the pixel cap', () => {

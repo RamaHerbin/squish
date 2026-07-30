@@ -45,7 +45,12 @@ export function imageSkipReason(
   // 6. Only the two device spaces decode cleanly. Indexed, Separation, ICCBased,
   //    CalRGB, Lab and anything else are left untouched.
   if (info.colorSpace !== '/DeviceRGB' && info.colorSpace !== '/DeviceGray') return 'colorspace';
-  // 7. Below the floor, a decode plus an encode costs more than it can save.
+  // 7. A non-identity /Decode remaps samples on the way out of the stream. No
+  //    decode path here applies it and `replaceImageStream` drops the key, so a
+  //    grayscale [1 0] would come back inverted. Reuses 'colorspace' — it is a
+  //    sample-mapping refusal — rather than widening the contract enum.
+  if (info.hasCustomDecode) return 'colorspace';
+  // 8. Below the floor, a decode plus an encode costs more than it can save.
   if (info.srcBytes < PDF_MIN_IMAGE_BYTES) return 'too-small';
   return undefined;
 }
