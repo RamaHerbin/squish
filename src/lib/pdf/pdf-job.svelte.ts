@@ -110,6 +110,19 @@ export class PdfJob {
   }
 
   /**
+   * Can {@link compress} do anything right now?
+   *
+   * `'error'` is in here so a run that died mid-flight is retryable: the
+   * analysis it was launched from is still valid, so there is nothing to redo
+   * before pressing Compress again. Only a missing or refused analysis is a
+   * genuine dead end — that is what the blocked screen is for.
+   */
+  get canCompress(): boolean {
+    if (this.phase !== 'ready' && this.phase !== 'done' && this.phase !== 'error') return false;
+    return this.analysis !== undefined && this.analysis.refusal === undefined;
+  }
+
+  /**
    * Read the document without changing a byte. Called once on mount; safe to
    * call again (the "choose another file" path mounts a fresh job instead).
    */
@@ -142,14 +155,15 @@ export class PdfJob {
   /**
    * Recompress the document with the current settings.
    *
-   * A no-op unless the analysis cleared the document (`'ready'`) or a previous
-   * run finished (`'done'`, so the rail can be re-tuned and re-run). Never
-   * concurrent: `'compressing'` falls through the same guard.
+   * A no-op unless {@link canCompress} — the analysis cleared the document
+   * (`'ready'`), a previous run finished (`'done'`, so the rail can be re-tuned
+   * and re-run), or a previous run failed (`'error'`, retryable against the same
+   * analysis). Never concurrent: `'compressing'` falls through the same guard.
    */
   async compress(): Promise<void> {
-    if (this.phase !== 'ready' && this.phase !== 'done') return;
+    if (!this.canCompress) return;
     const analysis = this.analysis;
-    // Belt and braces: the phase already implies a clean analysis, and a run
+    // Belt and braces: `canCompress` already implies a clean analysis, and a run
     // without one cannot tell "refused" from "nothing to do".
     if (!analysis || analysis.refusal) return;
 

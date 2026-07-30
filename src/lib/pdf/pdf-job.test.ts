@@ -41,6 +41,7 @@ function imageInfo(ref: string, srcBytes = 100_000): PdfImageInfo {
     bitsPerComponent: 8,
     hasSMask: false,
     isMask: false,
+    hasCustomDecode: false,
     srcBytes,
     effectiveDpi: 300,
   };
@@ -310,6 +311,44 @@ describe('PdfJob.compress', () => {
     expect(job.phase).toBe('error');
     expect(job.error).toBe('pdf-lib gave up');
     expect(job.result).toBeUndefined();
+    // The analysis survived the failure, so the run is retryable in place —
+    // otherwise the only way out is closing and reopening the document.
+    expect(job.canCompress).toBe(true);
+  });
+
+  it('retries a failed run against the surviving analysis', async () => {
+    let calls = 0;
+    const job = createPdfJob(pdfFile(), {
+      analyze: fakeAnalyze(analysisOf([imageInfo('4 0 R')])),
+      compress: async () => {
+        calls += 1;
+        if (calls === 1) throw new Error('pdf-lib gave up');
+        return resultOf(900);
+      },
+    });
+
+    await job.analyze();
+    await job.compress();
+    expect(job.phase).toBe('error');
+
+    await job.compress();
+
+    expect(calls).toBe(2);
+    expect(job.phase).toBe('done');
+    expect(job.error).toBeUndefined();
+    expect(job.result?.outBytes).toBe(900);
+  });
+
+  it('never re-arms compression for a refused document', async () => {
+    const job = createPdfJob(pdfFile(), {
+      analyze: fakeAnalyze(refusedAnalysis('signed')),
+      compress: async () => resultOf(900),
+    });
+
+    await job.analyze();
+
+    expect(job.phase).toBe('refused');
+    expect(job.canCompress).toBe(false);
   });
 
   it('allows another run after `done`, replacing the previous result', async () => {

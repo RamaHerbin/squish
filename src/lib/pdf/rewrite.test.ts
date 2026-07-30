@@ -208,6 +208,47 @@ describe('dedupeImages', () => {
     expect(dedupeImages(loaded)).toBe(0);
     expect(imageStreams(loaded)).toHaveLength(2);
   });
+
+  it('keeps byte-identical planes apart when they carry different soft masks', async () => {
+    const png = makePng(20, 20);
+    const doc = await PDFDocument.create();
+    const a = await doc.embedPng(png);
+    const b = await doc.embedPng(png);
+    doc.addPage([200, 200]).drawImage(a, { x: 0, y: 0, width: 100, height: 100 });
+    doc.addPage([200, 200]).drawImage(b, { x: 0, y: 0, width: 100, height: 100 });
+    const loaded = await PDFDocument.load(await doc.save());
+
+    // Two distinct masks over the same colour plane. Collapsing these would give
+    // both draws the canonical object's transparency and repaint the document.
+    const [first, second] = imageStreams(loaded);
+    first!.stream.dict.set(
+      PDFName.of('SMask'),
+      loaded.context.register(loaded.context.stream('mask-one')),
+    );
+    second!.stream.dict.set(
+      PDFName.of('SMask'),
+      loaded.context.register(loaded.context.stream('mask-two')),
+    );
+
+    expect(dedupeImages(loaded)).toBe(0);
+    expect(imageStreams(loaded)).toHaveLength(2);
+  });
+
+  it('keeps byte-identical planes apart when only one inverts /Decode', async () => {
+    const png = makePng(20, 20);
+    const doc = await PDFDocument.create();
+    const a = await doc.embedPng(png);
+    const b = await doc.embedPng(png);
+    doc.addPage([200, 200]).drawImage(a, { x: 0, y: 0, width: 100, height: 100 });
+    doc.addPage([200, 200]).drawImage(b, { x: 0, y: 0, width: 100, height: 100 });
+    const loaded = await PDFDocument.load(await doc.save());
+
+    const [, second] = imageStreams(loaded);
+    second!.stream.dict.set(PDFName.of('Decode'), loaded.context.obj([1, 0, 1, 0, 1, 0]));
+
+    expect(dedupeImages(loaded)).toBe(0);
+    expect(imageStreams(loaded)).toHaveLength(2);
+  });
 });
 
 describe('stripMetadata', () => {

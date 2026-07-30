@@ -23,6 +23,7 @@
   import { onDestroy, onMount } from 'svelte';
 
   import {
+    DEFAULT_PDF_SETTINGS,
     PDF_DPI_PRESETS,
     PDF_MIME_TYPE,
     PDF_QUALITY_RANGE,
@@ -73,7 +74,9 @@
   const settings = $derived(job.settings);
   const result = $derived(job.result);
   const railDisabled = $derived(job.phase === 'compressing');
-  const canCompress = $derived(job.phase === 'ready' || job.phase === 'done');
+  // Includes a failed run whose analysis is still good, so the rail stays up and
+  // the button re-arms instead of stranding the user behind an error banner.
+  const canCompress = $derived(job.canCompress);
 
   /** A refusal and a dead analysis are the same screen: a sentence and an exit. */
   const blocked = $derived(job.phase === 'refused' || (job.phase === 'error' && !analysis));
@@ -272,7 +275,7 @@
               class:on={settings.targetDpi === null}
               aria-pressed={settings.targetDpi === null}
               disabled={railDisabled}
-              onclick={() => patch({ targetDpi: null })}
+              onclick={() => patch({ targetDpi: null, maxPixels: null })}
             >
               Keep
             </button>
@@ -283,7 +286,7 @@
                 class:on={settings.targetDpi === dpi}
                 aria-pressed={settings.targetDpi === dpi}
                 disabled={railDisabled}
-                onclick={() => patch({ targetDpi: dpi })}
+                onclick={() => patch({ targetDpi: dpi, maxPixels: DEFAULT_PDF_SETTINGS.maxPixels })}
               >
                 {dpi}
               </button>

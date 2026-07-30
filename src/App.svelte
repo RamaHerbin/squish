@@ -322,7 +322,9 @@
    * settings and pdf screens — where the browser default (navigate away to the
    * dropped file) is the single most destructive thing that can happen to
    * unsaved work. On the PDF screen a dropped PDF routes like any other, which
-   * is how it replaces the job in place.
+   * is how it replaces the job in place. Those two self-handling screens still
+   * reach `routePdfs`: `HomeView` through `handleHomeFiles`, `QueueView` through
+   * its `onPdfDrop` prop, so a PDF opens the PDF screen from anywhere.
    */
   const windowDropTarget = $derived(
     view === 'editor' || view === 'matrix' || view === 'settings' || view === 'pdf',
@@ -659,6 +661,7 @@
           registry={ENCODER_REGISTRY}
           onSettingsChange={(settings) => (queueSettingsOverride = settings)}
           onEditSettings={() => go('editor')}
+          onPdfDrop={(files) => routePdfs(files).handled}
         />
       {:else}
         <section class="placeholder"><p class="placeholder-text">Preparing the queue…</p></section>
