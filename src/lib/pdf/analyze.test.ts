@@ -1,6 +1,6 @@
 import { deflateSync } from 'node:zlib';
 
-import { PDFDocument, PDFName, PDFNumber } from '@cantoo/pdf-lib';
+import { PDFDocument, PDFName, PDFNumber, PDFRawStream, type PDFDict } from '@cantoo/pdf-lib';
 import { describe, expect, it } from 'vitest';
 
 import { analyzePdf } from './analyze';
@@ -150,5 +150,87 @@ describe('analyzePdf — structure', () => {
     expect(image?.pageIndices).toEqual([0, 1]);
     // Smallest box is 60pt wide for 120px -> 144 DPI, which must win.
     expect(image?.effectiveDpi).toBeCloseTo(144, 0);
+  });
+
+  it('divides the effective DPI by the page /UserUnit', async () => {
+    const doc = await PDFDocument.create();
+    const png = await doc.embedPng(makePng(120, 90));
+    const page = doc.addPage([200, 200]);
+    page.drawImage(png, { x: 10, y: 10, width: 150, height: 120 });
+    // One user-space unit is worth two points: the page draws twice as large as
+    // its coordinates suggest, so the real resolution is half what they imply.
+    page.node.set(PDFName.of('UserUnit'), PDFNumber.of(2));
+    const bytes = await doc.save();
+
+    const analysis = await analyzePdf(bytes);
+    const [image] = analysis.images;
+    // Same placement as the un-scaled case (57.6), halved.
+    expect(image?.effectiveDpi).toBeCloseTo(28.8, 1);
+  });
+});
+
+/**
+ * A one-page document with one embedded PNG, with `patch` applied to that
+ * image's dict — the way to fabricate stream shapes pdf-lib will not write on
+ * its own.
+ *
+ * The save/reload in the middle is load-bearing: `embedPng` only reserves a ref,
+ * and the stream object it names does not exist until the document is written.
+ */
+async function pdfWithImageDict(
+  patch: (dict: PDFDict, doc: PDFDocument) => void,
+): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const png = await doc.embedPng(makePng(120, 90));
+  const page = doc.addPage([200, 200]);
+  page.drawImage(png, { x: 10, y: 10, width: 150, height: 120 });
+
+  const loaded = await PDFDocument.load(await doc.save());
+  let patched = 0;
+  for (const [, obj] of loaded.context.enumerateIndirectObjects()) {
+    if (obj instanceof PDFRawStream && obj.dict.get(PDFName.of('Subtype')) === IMAGE) {
+      patch(obj.dict, loaded);
+      patched += 1;
+    }
+  }
+  expect(patched).toBe(1); // a vacuous fixture would make every assertion pass
+  return loaded.save();
+}
+
+const IMAGE = PDFName.of('Image');
+
+describe('analyzePdf — undecodable shapes', () => {
+  it('reports a multi-filter chain as unknown rather than its last filter', async () => {
+    // Pretend the stream arrived ASCII85-wrapped. The DCT path hands the stored
+    // bytes straight to the JPEG decoder, so this must not be judged eligible.
+    const bytes = await pdfWithImageDict((dict, doc) => {
+      dict.set(PDFName.of('Filter'), doc.context.obj(['ASCII85Decode', 'DCTDecode']));
+    });
+
+    const analysis = await analyzePdf(bytes);
+    expect(analysis.images[0]?.filter).toBe('unknown');
+  });
+
+  it('still reads a single-entry filter array', async () => {
+    const bytes = await pdfWithImageDict((dict, doc) => {
+      dict.set(PDFName.of('Filter'), doc.context.obj(['FlateDecode']));
+    });
+
+    const analysis = await analyzePdf(bytes);
+    expect(analysis.images[0]?.filter).toBe('FlateDecode');
+  });
+
+  it('flags a non-identity /Decode and leaves an identity one alone', async () => {
+    const decodeFlag = async (decode?: readonly number[]): Promise<boolean | undefined> => {
+      const bytes = await pdfWithImageDict((dict, doc) => {
+        if (decode) dict.set(PDFName.of('Decode'), doc.context.obj([...decode]));
+      });
+      const analysis = await analyzePdf(bytes);
+      return analysis.images[0]?.hasCustomDecode;
+    };
+
+    expect(await decodeFlag()).toBe(false);
+    expect(await decodeFlag([0, 1, 0, 1, 0, 1])).toBe(false); // the identity, written out
+    expect(await decodeFlag([1, 0, 1, 0, 1, 0])).toBe(true); // inverted
   });
 });

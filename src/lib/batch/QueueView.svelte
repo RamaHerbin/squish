@@ -51,6 +51,13 @@
     onSettingsChange?: (settings: SideSettings) => void;
     /** Optional escape hatch to a full settings editor, offered inside the Preset popover. */
     onEditSettings?: () => void;
+    /**
+     * Shell-level PDF triage for drops this view owns. Returns true when the
+     * drop was taken elsewhere (the PDF screen), in which case nothing is queued.
+     * Without it a dropped PDF is silently discarded — it is not an image, so the
+     * collector filters it out and the queue simply never grows.
+     */
+    onPdfDrop?: (files: readonly File[]) => boolean;
   }
 
   let {
@@ -61,6 +68,7 @@
     library = defaultPresetLibrary,
     onSettingsChange,
     onEditSettings,
+    onPdfDrop,
   }: Props = $props();
 
   /* ------------------------------------------------------------------ */
@@ -247,6 +255,10 @@
     dragDepth = 0;
     dragging = false;
     manuallyStopped = false;
+    // Read the file list and offer it to the shell *before* the first await:
+    // `DataTransfer` is neutered the moment this handler yields.
+    const dropped = Array.from(event.dataTransfer?.files ?? []);
+    if (dropped.length > 0 && onPdfDrop?.(dropped)) return;
     await queue.addFromDataTransfer(event.dataTransfer);
   }
 

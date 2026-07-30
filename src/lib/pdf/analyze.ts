@@ -36,11 +36,13 @@ const KEY = {
   BitsPerComponent: PDFName.of('BitsPerComponent'),
   Filter: PDFName.of('Filter'),
   ColorSpace: PDFName.of('ColorSpace'),
+  Decode: PDFName.of('Decode'),
   SMask: PDFName.of('SMask'),
   ImageMask: PDFName.of('ImageMask'),
   XObject: PDFName.of('XObject'),
   Matrix: PDFName.of('Matrix'),
   Type: PDFName.of('Type'),
+  UserUnit: PDFName.of('UserUnit'),
   FT: PDFName.of('FT'),
   ByteRange: PDFName.of('ByteRange'),
   SigFlags: PDFName.of('SigFlags'),
@@ -148,6 +150,7 @@ interface ImageAcc {
   readonly bitsPerComponent: number;
   readonly hasSMask: boolean;
   readonly isMask: boolean;
+  readonly hasCustomDecode: boolean;
   readonly srcBytes: number;
   readonly pages: Set<number>;
   /** Largest effective DPI seen across every draw; `undefined` until placed. */
@@ -170,6 +173,7 @@ function enumerateImages(doc: PDFDocument): Map<string, ImageAcc> {
       bitsPerComponent: numAt(dict, KEY.BitsPerComponent) ?? (isMask ? 1 : 8),
       hasSMask: dict.has(KEY.SMask),
       isMask,
+      hasCustomDecode: hasCustomDecode(dict),
       srcBytes: obj.getContentsSize(),
       pages: new Set<number>(),
       dpi: undefined,
@@ -189,6 +193,7 @@ function finish(acc: ImageAcc): PdfImageInfo {
     bitsPerComponent: acc.bitsPerComponent,
     hasSMask: acc.hasSMask,
     isMask: acc.isMask,
+    hasCustomDecode: acc.hasCustomDecode,
     srcBytes: acc.srcBytes,
     ...(acc.dpi !== undefined ? { effectiveDpi: acc.dpi } : {}),
   };
@@ -201,15 +206,45 @@ function isImageStream(obj: PDFObject): obj is PDFRawStream {
   return sub instanceof PDFName && sub.asString() === '/Image';
 }
 
-/** The last filter in the chain — the one that dictates how bytes decode. */
+/**
+ * The filter that dictates how the stored bytes decode.
+ *
+ * A chain such as `/Filter [/ASCII85Decode /DCTDecode]` reports `'unknown'`, not
+ * its last entry: the DCT path hands `getContents()` straight to the JPEG worker
+ * and would feed it the still-ASCII85-wrapped bytes. Reporting the chain as
+ * undecodable makes SkipMap leave it alone, which is the honest answer until an
+ * outer-filter unwrap exists.
+ */
 function filterOf(dict: PDFDict): PdfImageFilter {
   const filter = dict.lookup(KEY.Filter);
   if (filter instanceof PDFName) return toFilter(filter.decodeText());
   if (filter instanceof PDFArray && filter.size() > 0) {
-    const last = filter.lookup(filter.size() - 1);
-    if (last instanceof PDFName) return toFilter(last.decodeText());
+    if (filter.size() > 1) return 'unknown';
+    const only = filter.lookup(0);
+    if (only instanceof PDFName) return toFilter(only.decodeText());
   }
   return 'unknown';
+}
+
+/**
+ * Does `/Decode` remap samples away from the identity?
+ *
+ * The identity is `[0 1]` per component, so any array that is not that pattern
+ * (`[1 0]` on a grayscale plane being the classic inverted scan) changes the
+ * pixels. Neither decode route applies the mapping and `replaceImageStream`
+ * builds a dict without `/Decode`, so an image carrying one must be skipped
+ * rather than silently recoloured.
+ */
+function hasCustomDecode(dict: PDFDict): boolean {
+  const decode = dict.lookup(KEY.Decode);
+  if (!(decode instanceof PDFArray)) return false;
+  for (let i = 0; i < decode.size(); i += 1) {
+    const n = decode.lookup(i);
+    // A non-numeric entry is malformed; treat it as custom and skip the image.
+    if (!(n instanceof PDFNumber)) return true;
+    if (n.asNumber() !== (i % 2 === 0 ? 0 : 1)) return true;
+  }
+  return false;
 }
 
 function toFilter(name: string): PdfImageFilter {
@@ -236,16 +271,33 @@ function attributePlacements(doc: PDFDocument, byRef: Map<string, ImageAcc>): vo
   for (let i = 0; i < pages.length; i += 1) {
     const leaf = pages[i]?.node;
     if (!leaf) continue;
+    // Content-stream coordinates are in default user-space units; /UserUnit says
+    // how many points one of them is worth. A page at /UserUnit 2 draws twice as
+    // large as its numbers suggest, so the real resolution is that much lower.
+    const userUnit = userUnitOf(leaf);
     const placements = walkContentStream(pageContentBytes(leaf), makeResolver(resourcesOf(leaf)));
     for (const placement of placements) {
       if (!placement.ref) continue;
       const acc = byRef.get(placement.ref);
       if (!acc) continue;
       acc.pages.add(i);
-      const dpi = effectiveDpi(placement.ctm, acc.width, acc.height);
+      const dpi = effectiveDpi(placement.ctm, acc.width, acc.height) / userUnit;
       if (dpi > 0) acc.dpi = acc.dpi === undefined ? dpi : Math.max(acc.dpi, dpi);
     }
   }
+}
+
+/**
+ * The page's inherited `/UserUnit`, or 1 when absent or nonsensical.
+ *
+ * Rare — it exists for pages larger than the 200 inch default limit — but when
+ * it is set, ignoring it scales every reported DPI by exactly that factor.
+ */
+function userUnitOf(leaf: PDFPageLeaf): number {
+  const value = leaf.getInheritableAttribute(KEY.UserUnit);
+  if (!(value instanceof PDFNumber)) return 1;
+  const unit = value.asNumber();
+  return Number.isFinite(unit) && unit > 0 ? unit : 1;
 }
 
 /**

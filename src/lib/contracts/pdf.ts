@@ -118,6 +118,12 @@ export interface PdfImageInfo {
   readonly hasSMask: boolean;
   /** True for `/ImageMask` stencils. */
   readonly isMask: boolean;
+  /**
+   * True when `/Decode` remaps sample values away from the identity, e.g. the
+   * inverted grayscale `[1 0]`. Neither decode path applies the mapping and
+   * `replaceImageStream` drops the key, so these are left alone.
+   */
+  readonly hasCustomDecode: boolean;
   /** Bytes of the encoded stream as stored. */
   readonly srcBytes: number;
   /**
