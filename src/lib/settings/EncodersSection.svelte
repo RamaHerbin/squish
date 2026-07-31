@@ -10,6 +10,7 @@
   import {
     EXTENSION_BY_MIME,
     isWorkerDecodableMimeType,
+    PDF_MIME_TYPE,
     type ImageMimeType,
   } from '../contracts';
   import { SELECTABLE_ENCODER_IDS } from './settings.svelte';
@@ -59,7 +60,8 @@
   <p class="intro">
     Everything Pinch can open. The browser decodes what it can natively; the wasm
     decoders cover the rest. HEIC and HEIF open fine but can only be encoded to
-    another format, which is why they are not in the encoder list above.
+    another format, which is why they are not in the encoder list above. PDF is
+    its own screen rather than an encoder target — see the note under it.
   </p>
 
   <div class="rows">
@@ -84,6 +86,23 @@
         <p class="note mono">{INPUT_NOTES[mime]}</p>
       {/if}
     {/each}
+
+    <div class="row">
+      <div class="identity">
+        <div class="labels">
+          <span class="label ext-label">.pdf</span>
+          <span class="ext mono">{PDF_MIME_TYPE}</span>
+        </div>
+      </div>
+      <div class="chips">
+        <Chip tone="ink">Own screen</Chip>
+        <Chip tone="muted">Recompresses embedded images</Chip>
+      </div>
+    </div>
+    <p class="note mono">
+      Opens on the PDF screen, not in the editor. Embedded JPEG and Flate images are
+      recompressed in place; text, vectors and the page count are untouched.
+    </p>
   </div>
 </div>
 

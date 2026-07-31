@@ -8,7 +8,9 @@ no account, and no analytics.
 
 You can check this the direct way: open your browser's network panel, compress something,
 and watch. The only requests are for the app's own code and the codec `.wasm` chunks,
-each fetched once and then cached. Or turn the network off entirely — Pinch is a PWA
+each fetched once and then cached. Opening a PDF adds one more set of the same kind: the
+pdf.js renderer, its worker and its data files, all served from this origin and cached
+after the first document. Nothing goes out. Or turn the network off entirely — Pinch is a PWA
 that precaches its shell and runtime-caches codecs, so after one visit it works offline.
 Nothing to upload also means nothing to leak.
 
@@ -142,6 +144,82 @@ Usually one of:
 The Original side of the compare is always available for download unchanged, so a bad
 trade costs you nothing.
 
+## What does Pinch actually do to a PDF?
+
+It rewrites the raster images inside it, and nothing else. Pinch opens the document,
+finds every embedded image, re-encodes the ones it can safely decode as JPEG at the
+quality you picked — optionally downsampling anything drawn above a target DPI — and
+writes the file back with those image streams swapped.
+
+Text, vectors, fonts, page structure, the page count and the accessibility tree are
+untouched. That is the whole design: a PDF is never decoded and rebuilt, it is edited in
+place. It also means the honest unit of work is the *image*, not the document, which is
+why the screen gives you a row per embedded image instead of one "42% smaller" and no
+explanation of where the other 58% went.
+
+Two settings beyond quality and DPI are on by default and are pure structural wins:
+**dedupe identical images** points byte-identical streams at a single object, and **strip
+metadata** drops the XMP metadata stream and page thumbnails. Neither touches a pixel.
+
+## Why did my PDF barely shrink?
+
+Because there was not much image in it. A text-and-vector document — an invoice, a
+contract, a LaTeX paper — is mostly content Pinch deliberately does not rewrite, so
+there is nothing to win. If the document has no embedded images at all, the table says
+so, and stripping metadata is the only saving on offer.
+
+The other common case is a document whose images Pinch will not touch. Every skipped
+image says why in its own row:
+
+- **Too small** — under 4 KB. A decode plus an encode costs more than it could save.
+- **No decoder** — JPEG 2000, JBIG2, CCITT fax, LZW, RunLength, or a chained filter.
+  Pinch ships decoders for `DCTDecode` and `FlateDecode` and refuses to guess at the
+  rest. Also shown for Flate images when you switch **Flate → JPEG** off, which removes
+  the only decoder path left.
+- **CMYK** — print colour. Adobe writes these inverted behind an APP14 marker, and
+  getting that wrong yields a colour negative rather than a slightly soft image.
+- **Colour space** — an exotic colour space, non-8-bit samples, or a non-identity
+  `/Decode` array such as the inverted-grayscale scans some scanners emit.
+- **Mask** — a stencil or colour-key mask. A shape, not a picture.
+- **No gain** — it was recompressed, the result was not smaller, so the original was
+  kept. This one can only appear after a run, never in the plan.
+- **Failed** — the decode or encode threw. The original stayed.
+
+The first five are computed before anything is decoded, so the plan column tells you
+what will happen while you are still moving the quality slider.
+
+## Why won't it open my encrypted or signed PDF?
+
+Because the honest answers are "I can't" and "I shouldn't".
+
+An **encrypted** PDF cannot be read without the password, and rewriting a file Pinch
+cannot decrypt produces a broken one. Remove the password first.
+
+A **digitally signed** PDF is refused on purpose. Any rewrite invalidates the signature —
+that is what a signature is for. Pinch could strip the images and hand you back a
+document whose signature no longer verifies, which is worse than doing nothing, so it
+declines and says why.
+
+An **unreadable** file is one pdf-lib could not parse at all: not a PDF, or damaged.
+
+In all three cases you get a sentence and a way out, never a cheerful "0% saved" over a
+file that was never touched.
+
+## Will the pages still look right?
+
+That is a question about pixels, and bytes cannot answer it — so the PDF screen renders
+the pages. After a run you get the original page and the compressed one under the same
+draggable divider the image editor uses, at one shared scale, and you can page through
+the document.
+
+Worth knowing what you are looking at: only image pixels changed, so most of a rendered
+page is identical on both sides and is there as context. The divider is for the
+photographs.
+
+One caveat the preview will show you: transparency in an embedded image is flattened.
+Baseline JPEG carries no alpha channel, so a soft mask is folded in and dropped on
+replace.
+
 ## What is the relationship to Squoosh?
 
 Squoosh is the reason Pinch exists. It proved the whole idea — codecs in WebAssembly,
@@ -190,7 +268,10 @@ mode. If you want to script image compression, use the underlying libraries dire
 ## Can I use it offline?
 
 Yes, once you have loaded it once. The app shell is precached by the service worker;
-each codec's wasm is cached the first time you use that codec. Install it (Chromium's
+each codec's wasm is cached the first time you use that codec. The pdf.js renderer behind
+the PDF preview works the same way — it is deliberately kept out of the precached shell,
+because a visitor who never opens a PDF should not pay to download it, and it is cached
+from the first document onward. Install it (Chromium's
 install button, or Add to Home Screen on iOS) and it behaves like a local application.
 
 A new version installs in the background and waits — you get a "Reload" prompt rather
@@ -198,7 +279,10 @@ than a silent swap under a half-finished encode.
 
 ## What are the limits?
 
-- **50 MB per file.** Larger files are skipped and named in the message.
+- **50 MB per image, 150 MB per PDF.** Larger files are skipped and named in the
+  message. PDFs get the higher ceiling because the work is sequential and streamed —
+  the real limit is peak memory during one image's decode, not the file's size.
+- **4 KB per embedded image** before a PDF image is worth recompressing at all.
 - **5000 files per drop**, and 16 levels of directory recursion, so a stray
   `node_modules` cannot hang the tab.
 - **8 parallel worker lanes** for batch and matrix runs, or
