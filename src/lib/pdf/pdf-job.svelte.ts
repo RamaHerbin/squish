@@ -393,6 +393,13 @@ export class PdfJob {
       // a page the user has just been told failed. Abort so it stops at the next
       // slice; the signal is this render's alone, so nothing else is affected.
       controller.abort();
+      // Drop whatever is on screen. `previewPage` moved to the requested page
+      // before the render started, and the view labels the panes from it — so
+      // keeping the last good pair would caption another page's pixels with
+      // this one's number and its error, which reads as "here is page 4, and
+      // page 4 failed". Holding them is only right while a render is still in
+      // flight, which is the branch above.
+      this.preview = undefined;
       this.previewError = messageOf(error, 'Rendering this page failed');
     } finally {
       // A newer page took over while this one was rendering: the flag is its

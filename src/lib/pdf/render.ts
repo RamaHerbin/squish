@@ -26,6 +26,24 @@
  * exact one this repository has already shipped a fix for elsewhere, so it is
  * detected here and turned into a {@link PdfWorkerError}.
  *
+ * ## The `legacy/` build, not the default one
+ *
+ * pdf.js 6's default build calls `Promise.withResolvers` 27 times. Safari only
+ * shipped that in 17.4 — so the default build breaks the preview on Safari 16
+ * and 17.0–17.3, and in the WKWebView of macOS 12 and 13, which
+ * `src-tauri/tauri.conf.json` still accepts as `minimumSystemVersion`. It is
+ * not a Tauri-only concern: web visitors on those Safari versions would fail
+ * the same way.
+ *
+ * `legacy/` is upstream's answer, bundling
+ * `core-js/modules/es.promise.with-resolvers.js` among others rather than
+ * avoiding the API. It costs ~179 KB on the library and ~50 KB on the worker,
+ * both of which are lazy chunks, so the entry is untouched. Preferred over
+ * hand-polyfilling because it tracks whatever else upstream decides it needs —
+ * guessing that list ourselves is how a browser we do not test on breaks
+ * quietly. The repo already treats Safari 16 as a browser it works around
+ * rather than drops (see `docs/browser-support.md`).
+ *
  * ## Scale is a viewport fit, never a DPI
  *
  * Callers pass a scale from {@link fitScale}. Rendering "at 300 DPI" is the
@@ -35,7 +53,7 @@
  * caller that asks for more anyway.
  */
 
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import type {
   PageViewport,
   PDFDocumentLoadingTask,
@@ -256,7 +274,7 @@ let modulePromise: Promise<PdfjsModule> | undefined;
  */
 function loadPdfjs(): Promise<PdfjsModule> {
   if (!modulePromise) {
-    modulePromise = import('pdfjs-dist')
+    modulePromise = import('pdfjs-dist/legacy/build/pdf.mjs')
       .then((pdfjs) => {
         pdfjs.GlobalWorkerOptions.workerSrc = new URL(pdfWorkerUrl, location.href).href;
         return pdfjs;

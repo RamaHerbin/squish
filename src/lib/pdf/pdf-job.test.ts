@@ -689,6 +689,22 @@ describe('PdfJob.showPage', () => {
     expect(job.preview?.pageIndex).toBe(0);
   });
 
+  it('drops the last good page when a later one fails to render', async () => {
+    const renderers = fakeRenderers({ failOn: 1 });
+    const job = await previewJob(renderers);
+
+    await job.showPage(0);
+    expect(job.preview?.pageIndex).toBe(0);
+
+    // `previewPage` moved to 1 before the render started and the view captions
+    // the panes from it, so leaving page 0's pixels up would label them as the
+    // page that just failed.
+    await job.showPage(1);
+    expect(job.previewPage).toBe(1);
+    expect(job.previewError).toBe('page is broken');
+    expect(job.preview).toBeUndefined();
+  });
+
   it('drops the preview and both handles when another run starts', async () => {
     const renderers = fakeRenderers();
     const job = await previewJob(renderers);
