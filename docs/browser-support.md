@@ -70,6 +70,14 @@ scope when nested workers are unavailable, which makes jSquash's internal probe 
 the single-threaded build. It runs before any codec is imported and is a no-op everywhere
 that combination is sane.
 
+The same lever is pulled for a second case that no sniff and no probe can reach: a browser
+that *can* spawn nested workers but refuses this particular one, because the copy of the
+script in its HTTP cache carries no `Cross-Origin-Embedder-Policy`. `Worker` works fine
+there, so the only evidence is a worker that already died — `codecs/bridge.ts` watches for
+that and respawns with `?nothreads=1`, which makes the new worker apply the workaround with
+`force`. Version-agnostic in the same way: it is a reaction to observed behaviour, never to
+a user-agent string.
+
 ### Decode order
 
 1. `ImageDecoder` (WebCodecs) when present — it works off the main thread and hands back

@@ -36,6 +36,7 @@ import {
   createAbortError,
   fromTransferable,
   toTransferable,
+  SINGLE_THREADED_PARAM,
   WorkerLoadError,
   WorkerTimeoutError,
   type CreateWorkerBridge,
@@ -47,6 +48,7 @@ import {
   type WorkerResizeOptions,
 } from '../contracts';
 import type { CodecWorkerApi } from './codec.worker';
+import codecWorkerUrl from './codec.worker.ts?worker&url';
 
 /** How long a worker may sit idle before it is terminated. Matches Squoosh. */
 export const WORKER_IDLE_TIMEOUT_MS = 10_000;
@@ -64,8 +66,15 @@ export const WORKER_WATCHDOG_PER_MP_MS = 4_000;
 export const WORKER_WATCHDOG_CEIL_MS = 120_000;
 
 export interface WorkerBridgeOptions {
-  /** Worker factory. Override in tests to inject a fake endpoint. */
-  createWorker?: () => Worker;
+  /**
+   * Worker factory. Override in tests to inject a fake endpoint.
+   *
+   * `nothreads` is `true` once this bridge has latched single-threaded mode
+   * after a load failure; the default factory turns it into
+   * `?nothreads=1` on the worker URL. A zero-argument override still satisfies
+   * this type, so existing fakes keep working.
+   */
+  createWorker?: (nothreads: boolean) => Worker;
   /** Override {@link WORKER_IDLE_TIMEOUT_MS}. `Infinity` disables the timer. */
   idleTimeoutMs?: number;
   /**
@@ -78,11 +87,96 @@ export interface WorkerBridgeOptions {
 /**
  * The one place the worker URL appears.
  *
- * `new URL(..., import.meta.url)` is the form Vite statically analyses, so the
- * worker gets its own bundle with its own dynamic-import chunks for each codec.
+ * Not the usual `new Worker(new URL('./codec.worker.ts', import.meta.url))`,
+ * because the bridge has to put a query on that URL and Vite's worker analysis
+ * is a *regex over the source text*: it only rewrites a `new Worker(`
+ * immediately followed by `new URL(<string literal>, import.meta.url)`. Lift
+ * the `new URL` into a variable to mutate it and the pattern stops matching —
+ * at which point the build emits `codec.worker.ts` as a raw asset instead of
+ * bundling it, no codec chunk is reachable, and every wasm codec dies. That is
+ * not a guess: `npm run build` drops from 70 precached files to 34.
+ *
+ * `?worker&url` asks for exactly the same thing through the supported door —
+ * Vite runs the identical `workerFileToUrl` bundling and hands back the built
+ * chunk's URL as a string, leaving us free to shape it.
+ *
+ * Resolving against `location.href` rather than `import.meta.url` matches what
+ * `new Worker(<string>)` would have done — Vite's asset URLs are relative to
+ * the document, not to the chunk that mentions them.
  */
-function spawnCodecWorker(): Worker {
-  return new Worker(new URL('./codec.worker.ts', import.meta.url), { type: 'module' });
+function spawnCodecWorker(nothreads: boolean): Worker {
+  const url = new URL(codecWorkerUrl, location.href);
+  // A distinct URL is also a distinct HTTP cache entry, which is a bonus here:
+  // the retry cannot be served the same stale copy that caused the failure.
+  if (nothreads) url.searchParams.set(SINGLE_THREADED_PARAM, '1');
+  return new Worker(url, { type: 'module' });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Failure diagnosis                                                           */
+/* -------------------------------------------------------------------------- */
+
+/** The fields an `ErrorEvent` adds on top of `Event`, read structurally. */
+interface WorkerErrorFields {
+  readonly message?: unknown;
+  readonly filename?: unknown;
+  readonly lineno?: unknown;
+  readonly colno?: unknown;
+}
+
+/**
+ * What the browser actually said about a worker failure.
+ *
+ * Two very different events arrive on the same listener, and flattening them
+ * into one string is what made the production failure undiagnosable:
+ *
+ * - a **bare `Event`** means the *script response* was rejected before a line of
+ *   it ran — a 404, a network error, or a cached copy without a
+ *   `Cross-Origin-Embedder-Policy` header, which a cross-origin-isolated page
+ *   refuses to instantiate. The browser supplies no detail here *by design*, so
+ *   name the likely causes instead of printing `[object Event]`.
+ * - an **`ErrorEvent`** means the worker ran and threw. `filename`/`lineno` name
+ *   the chunk, which is the only way to tell *which* codec died.
+ *
+ * Read structurally rather than with `instanceof ErrorEvent`: that constructor
+ * does not exist in Node, where this file's tests run.
+ */
+function describeWorkerFailure(event: Event): string {
+  const { message, filename, lineno, colno } = event as Event & WorkerErrorFields;
+
+  let at = '';
+  if (typeof filename === 'string' && filename) {
+    const line = typeof lineno === 'number' ? lineno : undefined;
+    const column = typeof colno === 'number' ? colno : 0;
+    at = line === undefined ? ` in ${filename}` : ` in ${filename}:${line}:${column}`;
+  }
+
+  if (typeof message === 'string' && message) return `${message}${at}`;
+  if (at) return `no error detail${at}`;
+  if (event.type === 'messageerror') return 'a worker message could not be deserialised';
+  return (
+    'the browser refused the worker script without saying why — usually a cached ' +
+    'copy predating COOP/COEP, or a missing chunk'
+  );
+}
+
+/** The single user-facing wording, so both failure paths read identically. */
+function workerLoadError(detail: string): WorkerLoadError {
+  return new WorkerLoadError(
+    `The codec worker failed to load (${detail}). Reload the page and try again.`,
+  );
+}
+
+/**
+ * Internal hand-back from `onWorkerError` to `execute`: *this worker died, the
+ * bridge has latched threads off, run the call again*. It never escapes the
+ * bridge — `execute` either retries or converts it to a {@link WorkerLoadError}.
+ */
+class SingleThreadedRetry extends Error {
+  constructor(readonly detail: string) {
+    super(detail);
+    this.name = 'SingleThreadedRetry';
+  }
 }
 
 type Remote = Comlink.Remote<CodecWorkerApi>;
@@ -102,8 +196,15 @@ class CodecWorkerBridge implements WorkerBridgeApi {
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
   /** Rejectors for calls currently awaiting the worker, so terminate can settle them. */
   private readonly inFlight = new Set<(reason: unknown) => void>();
+  /**
+   * Latched by the first load failure. Every worker spawned afterwards asks for
+   * the single-threaded wasm builds, for the rest of this bridge's life. It is
+   * deliberately one-way: nested workers that a document refused once are not
+   * going to start being allowed later in the same document.
+   */
+  private threadsBroken = false;
 
-  private readonly spawn: () => Worker;
+  private readonly spawn: (nothreads: boolean) => Worker;
   private readonly idleTimeoutMs: number;
   private readonly watchdogMs: number | 'auto';
 
@@ -119,7 +220,7 @@ class CodecWorkerBridge implements WorkerBridgeApi {
 
   private connect(): Remote {
     if (!this.api) {
-      const worker = this.spawn();
+      const worker = this.spawn(this.threadsBroken);
       // Comlink never observes a worker that fails to load — the encode message
       // just goes nowhere and the call hangs. Listen for the worker's own
       // failure events and settle everything in flight loudly instead.
@@ -131,15 +232,26 @@ class CodecWorkerBridge implements WorkerBridgeApi {
     return this.api;
   }
 
-  /** A load/instantiation failure of the worker itself — never settles on its own. */
+  /**
+   * A load/instantiation failure of the worker itself — never settles on its own.
+   *
+   * The failure that actually happens in production is not this worker's script
+   * but a *nested* one: the threaded wasm builds start emscripten's pthread
+   * pool, and a browser that refuses one of those scripts leaves emscripten
+   * rethrowing a bare `Event` straight out of our worker. So the first failure
+   * is not reported to the user at all. It latches threads off and hands the
+   * in-flight call back to {@link execute}, which runs it again on a fresh
+   * worker that will not touch threads. Only a failure *after* the latch is a
+   * genuine one worth a {@link WorkerLoadError}.
+   */
   private readonly onWorkerError = (event: Event): void => {
-    const detail =
-      event instanceof ErrorEvent && event.message ? ` (${event.message})` : '';
+    const detail = describeWorkerFailure(event);
+    const firstFailure = !this.threadsBroken;
+    // Latch before the worker goes away: connect() reads it on the next spawn.
+    this.threadsBroken = true;
     this.disposeWorker();
     this.failInFlight(
-      new WorkerLoadError(
-        `The codec worker failed to load${detail}. Reload the page and try again.`,
-      ),
+      firstFailure ? new SingleThreadedRetry(detail) : workerLoadError(detail),
     );
   };
 
@@ -213,7 +325,32 @@ class CodecWorkerBridge implements WorkerBridgeApi {
     });
   }
 
+  /**
+   * Run a call, and — when the worker died on this bridge's *first* load
+   * failure — run it once more on the single-threaded worker the latch now
+   * selects.
+   *
+   * The retry is silent by design: a slower successful encode beats a dead app,
+   * and "your browser cached a worker script without a COEP header" is not
+   * something a user can act on. There is no third attempt — the second failure
+   * arrives as a plain {@link WorkerLoadError} because the latch is already set.
+   */
   private async execute<T>(
+    signal: AbortSignal,
+    task: (api: Remote) => Promise<T>,
+    budgetMs: number,
+    retryable: boolean,
+  ): Promise<T> {
+    try {
+      return await this.attempt(signal, task, budgetMs);
+    } catch (error) {
+      if (!(error instanceof SingleThreadedRetry)) throw error;
+      if (!retryable) throw workerLoadError(error.detail);
+      return await this.attempt(signal, task, budgetMs);
+    }
+  }
+
+  private async attempt<T>(
     signal: AbortSignal,
     task: (api: Remote) => Promise<T>,
     budgetMs: number,
@@ -253,13 +390,19 @@ class CodecWorkerBridge implements WorkerBridgeApi {
     }
   }
 
-  /** Queue a call behind everything already in flight on this worker. */
+  /**
+   * Queue a call behind everything already in flight on this worker.
+   *
+   * `retryable` says whether `task` may be run a second time — see
+   * {@link execute}. Only {@link decode} says no.
+   */
   private run<T>(
     signal: AbortSignal,
     task: (api: Remote) => Promise<T>,
     budgetMs: number,
+    retryable = true,
   ): Promise<T> {
-    const result = this.queue.then(() => this.execute(signal, task, budgetMs));
+    const result = this.queue.then(() => this.execute(signal, task, budgetMs, retryable));
     // The queue must keep flowing regardless of how this call ends, and must
     // not look like an unhandled rejection while the caller holds `result`.
     this.queue = result.then(
@@ -285,6 +428,12 @@ class CodecWorkerBridge implements WorkerBridgeApi {
         return fromTransferable(payload);
       },
       this.watchdogBudget(),
+      // The one call that cannot be retried: `buffer` is transferred into the
+      // worker on the first attempt and detached here afterwards, so there is
+      // nothing left to send. Nothing is lost — jSquash ships threaded builds
+      // for *encoders* only, so a decode never selects the code path the retry
+      // exists for.
+      false,
     );
   }
 

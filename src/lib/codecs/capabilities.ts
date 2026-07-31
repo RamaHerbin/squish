@@ -129,9 +129,23 @@ export function supportsWasmThreads(): Promise<boolean> {
   return threadsPromise;
 }
 
+
 /**
- * Neutralise threaded wasm in this realm when the nested workers it needs are
- * missing (Safari 16.0–16.3).
+ * Neutralise threaded wasm in this realm when the nested workers it needs
+ * cannot be spawned.
+ *
+ * Two situations need this, and they are found out in opposite ways:
+ *
+ * 1. **Safari 16.0–16.3** reports wasm threads support but has no nested
+ *    workers at all. `supportsNestedWorkers()` sees that directly, so the
+ *    default (unforced) call handles it.
+ * 2. **The nested worker script is refused or missing.** A cross-origin-isolated
+ *    page will not instantiate a worker whose *script response* lacks a matching
+ *    `Cross-Origin-Embedder-Policy` header, and a long-lived `immutable` HTTP
+ *    cache keeps serving a returning visitor the copy it fetched before that
+ *    header existed. A 404'd chunk fails the same way. `Worker` exists and works
+ *    fine in those browsers, so no probe here can see it coming — the bridge
+ *    finds out by watching a worker die and respawns it with `force`.
  *
  * jSquash decides between the single- and multi-threaded builds internally, by
  * calling `wasm-feature-detect`'s `threads()`, which only looks at
@@ -142,11 +156,13 @@ export function supportsWasmThreads(): Promise<boolean> {
  *
  * Call once at worker startup. No-op everywhere the combination is sane.
  *
+ * @param force apply even when nested workers look supported — case 2, where
+ *   the only evidence is a worker that already died.
  * @returns true when the workaround was applied.
  */
-export function applyNestedWorkerWorkaround(): boolean {
+export function applyNestedWorkerWorkaround(force = false): boolean {
   if (!isWorkerScope()) return false;
-  if (supportsNestedWorkers()) return false;
+  if (!force && supportsNestedWorkers()) return false;
   if (typeof SharedArrayBuffer === 'undefined') return false;
   try {
     return Reflect.deleteProperty(globalThis, 'SharedArrayBuffer');
