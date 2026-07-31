@@ -45,6 +45,7 @@
  *   public/demo/demo-hdr.avif          1600×1200 the same sheet, 10-bit PQ
  *   docs/media/home.png                1440×1010 app screenshot
  *   docs/media/editor.png              1440×900  app screenshot
+ *   docs/media/pdf.png                 1440×1100 app screenshot
  */
 
 import { execFileSync, spawn } from 'node:child_process';
@@ -1235,6 +1236,50 @@ async function buildScreenshots(browser) {
     const editor = p('docs/media/editor.png');
     await page.screenshot({ path: editor });
     record(editor, await fs.readFile(editor), [1440, 900]);
+
+    // The PDF screen, using the bundled two-page report — the same file the demo
+    // card on the home screen loads, so the shot shows what a reader can click.
+    // Nothing is pressed: the view analyses and compresses on mount, then
+    // rasterises page 1 of both documents on its own.
+    //
+    // Taller than the editor shot, for the same reason home.png is: the preview
+    // stage takes what the rail and the table leave it, and at 900px a portrait
+    // page fits to about a fifth of the width and the shot is mostly empty bed.
+    // The extra height goes to the pages, which are the point of the screen.
+    //
+    // 1100 and not more, deliberately. The result strip below the actions row
+    // ends in `Took {n} ms`, which is a stopwatch reading — it differs on every
+    // run, and this target's whole contract is that a second run reproduces the
+    // first byte for byte. The frame stops above it.
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await page.goto(`http://localhost:${port}/`, { waitUntil: 'networkidle', timeout: 60_000 });
+    await page.locator('input[type=file]').first().setInputFiles(p('public/demo/demo-report.pdf'));
+
+    // Wait for the run AND for both panes to have real pixels. The canvases are
+    // in the DOM from the first frame, so their presence proves nothing; an
+    // unpainted one would photograph as an empty bed. Same check as
+    // `e2e/pdf.smoke.spec.ts`, for the same reason.
+    await page.locator('.pdf-result .figure').first().waitFor({ timeout: 180_000 });
+    await page.waitForFunction(
+      () =>
+        [...document.querySelectorAll('.pdf-preview canvas')].every((canvas) => {
+          if (!canvas.width || !canvas.height) return false;
+          const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height)
+            .data;
+          const first = `${pixels[0]},${pixels[1]},${pixels[2]}`;
+          for (let i = 4; i < pixels.length; i += 4 * 499) {
+            if (`${pixels[i]},${pixels[i + 1]},${pixels[i + 2]}` !== first) return true;
+          }
+          return false;
+        }),
+      null,
+      { timeout: 180_000 },
+    );
+    await page.waitForTimeout(1200);
+
+    const pdf = p('docs/media/pdf.png');
+    await page.screenshot({ path: pdf });
+    record(pdf, await fs.readFile(pdf), [1440, 1100]);
   } finally {
     await page.close();
     server.kill();

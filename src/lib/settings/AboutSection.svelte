@@ -24,7 +24,7 @@
     <div class="privacy-card">
       <BrandDot accent="blue" size={13} />
       <p>
-        Images never leave this device. Encoding runs in WebAssembly inside your browser, there is
+        Nothing leaves this device. Encoding runs in WebAssembly inside your browser, there is
         no server to send them to, and the app works with the network switched off.
       </p>
     </div>

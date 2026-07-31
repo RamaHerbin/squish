@@ -401,8 +401,8 @@
             Choose files
           </PillButton>
         </div>
-        <span class="empty-corner left mono-label mono-label--xs">JPEG · PNG · WEBP · AVIF · SVG · GIF</span>
-        <span class="empty-corner right mono-label mono-label--xs">MAX 50 MB / FILE</span>
+        <span class="empty-corner left mono-label mono-label--xs">JPEG · PNG · WEBP · AVIF · SVG · GIF · PDF</span>
+        <span class="empty-corner right mono-label mono-label--xs">MAX 50 MB / IMAGE · 150 MB / PDF</span>
       </div>
     </div>
   {:else}
