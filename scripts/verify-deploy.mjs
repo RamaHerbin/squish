@@ -152,8 +152,26 @@ function localAssets() {
       'Run `npm run build` first — this compares the deploy against the local build.',
     );
   }
-  const names = fs.readdirSync(dir).sort();
-  const workers = names.filter((name) => name.endsWith('.js') && /worker/i.test(name));
+  // Recursive, and `.mjs` counts. Both matter as of the PDF preview: its worker
+  // is `pdf.worker.min-<hash>.mjs`, which a `.js` test misses, and pdf.js's
+  // decoders live under `assets/pdfjs/<version>/wasm/`, which a flat readdir
+  // misses. Those nested files are exactly the ones a misconfigured host
+  // answers with the SPA shell — and pdf.js runs with `ignoreErrors`, so it
+  // drops the affected images rather than failing, which is invisible from
+  // outside. Paths are returned relative to `assets/` so callers can join them
+  // onto the origin unchanged.
+  const names = [];
+  const walk = (from, prefix) => {
+    for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(path.join(from, entry.name), rel);
+      else names.push(rel);
+    }
+  };
+  walk(dir, '');
+  names.sort();
+
+  const workers = names.filter((name) => /\.m?js$/.test(name) && /worker/i.test(name));
   const wasm = names.filter((name) => name.endsWith('.wasm'));
 
   // Neither list may be empty: if the naming ever changes under this script it
