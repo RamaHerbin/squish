@@ -97,11 +97,11 @@ function fail(message, hint) {
  * deterministic — a header is either configured or it is not — so a retry
  * cannot mask a real finding, and it stops an edge hiccup from crying wolf.
  */
-async function probe(url) {
+async function probe(url, { redirect = 'follow' } = {}) {
   for (let attempt = 0; ; attempt++) {
     try {
       const signal = AbortSignal.timeout(TIMEOUT_MS);
-      const response = await fetch(url, { redirect: 'follow', signal });
+      const response = await fetch(url, { redirect, signal });
       await response.body?.cancel().catch(() => {});
       if ((response.status >= 500 || response.status === 429) && attempt === 0) {
         await sleep(1_000);
@@ -365,19 +365,49 @@ console.log(`  assets                 ${workers.length} worker script(s), ${wasm
  * with an SSO page, so nothing below can be measured and every asset would fail
  * for a reason that is not a bug. That is "not applicable", not "broken", so it
  * exits clean — a red X nobody can fix is how a check ends up deleted.
+ *
+ * Detected on a manual-redirect preflight, because the interesting part is the
+ * hop itself. Vercel does not answer 401: it sends `302 Location:
+ * https://vercel.com/sso-api?...`, and following that lands on a perfectly
+ * healthy `200 text/html` login page. Under `redirect: 'follow'` the status is
+ * 200, so a status test can never see it — the run this replaced reported all
+ * 27 assets as `text/html` with no COEP, which is true of the login page and
+ * says nothing about the build. Any redirect that leaves this origin means the
+ * origin is not the thing answering.
  */
+const gate = await probe(`${origin}/`, { redirect: 'manual' });
+if (gate.error) {
+  fail(
+    `could not reach ${origin}/: ${gate.error}`,
+    'Is the URL right, and has the deployment finished?',
+  );
+}
+const gateLocation = gate.headers?.get('location') ?? '';
+const leavesOrigin =
+  gate.status >= 300 &&
+  gate.status < 400 &&
+  gateLocation !== '' &&
+  new URL(gateLocation, origin).origin !== origin;
+
+if (gate.status === 401 || gate.status === 403 || leavesOrigin) {
+  const how = leavesOrigin
+    ? `redirects to ${new URL(gateLocation, origin).origin}`
+    : `HTTP ${gate.status}`;
+  console.log(`\n  / ${how} — the deployment is access-protected, nothing to verify.\n`);
+  console.log(
+    '  Vercel Deployment Protection covers preview URLs by default. Production is\n' +
+      '  unprotected and is verified normally; to check previews too, set a protection\n' +
+      '  bypass secret and send it as x-vercel-protection-bypass.\n',
+  );
+  process.exit(0);
+}
+
 const index = await probe(`${origin}/`);
 if (index.error) {
   fail(
     `could not reach ${origin}/: ${index.error}`,
     'Is the URL right, and has the deployment finished?',
   );
-}
-if (index.status === 401 || index.status === 403) {
-  console.log(
-    `\n  HTTP ${index.status} on / — the deployment is access-protected, nothing to verify.\n`,
-  );
-  process.exit(0);
 }
 
 const assets = [...workers, ...wasm];

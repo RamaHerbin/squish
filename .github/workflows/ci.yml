@@ -111,8 +111,13 @@ jobs:
     # subject is a check people learn to ignore.
     #
     # Preview deployments are included on purpose: they are where a vercel.json
-    # change can be caught before it reaches production. An access-protected
-    # preview answers 401 on every path, which the script reports and exits 0 on.
+    # change can be caught before it reaches production. Vercel's Deployment
+    # Protection covers preview URLs by default, though, and it does not answer
+    # 401 — it 302s to vercel.com/sso-api, and following that lands on a healthy
+    # login page. The script preflights with redirect: 'manual' and exits 0 when
+    # the origin hands the request off somewhere else, so a protected preview
+    # reports "nothing to verify" instead of failing all 27 assets. Production is
+    # unprotected and is checked for real.
     if: >-
       (github.event_name == 'deployment_status'
       && github.event.deployment_status.state == 'success'
