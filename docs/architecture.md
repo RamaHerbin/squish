@@ -88,10 +88,19 @@ which only looks at `SharedArrayBuffer`, and offers no override — so the worka
 deletes `SharedArrayBuffer` from the worker's global scope, which makes that probe
 report `false` and selects the single-threaded build.
 
+It also takes a `force` argument, for the case no probe can see coming: a browser that
+*can* spawn nested workers but **refuses this particular script**, because the response
+it has cached carries no `Cross-Origin-Embedder-Policy`. There is nothing to detect
+ahead of time there — the bridge finds out by watching a worker die, and asks for the
+retry by putting `?nothreads=1` (`SINGLE_THREADED_PARAM`) on the new worker's own URL.
+That query string is the only channel available: jSquash fixes its choice at first
+codec init, so the decision has to be made in a *fresh* worker before any message could
+have arrived.
+
 ### The bridge
 
 `src/lib/codecs/bridge.ts` is the main-thread half, ported from Squoosh's
-`worker-bridge` with the same three behaviours:
+`worker-bridge` with the same three behaviours (plus a fourth of our own):
 
 1. **Lazy spawn, idle terminate.** No worker exists until the first call; after
    `WORKER_IDLE_TIMEOUT_MS` (10 s) of silence it is terminated, so a tab left open on a
@@ -103,6 +112,24 @@ report `false` and selects the single-threaded build.
    module. The only real cancellation is `worker.terminate()`, so that is what an
    `AbortSignal` does here: kill the worker, reject everything in flight with an
    `AbortError`, spawn a fresh one on the next call.
+4. **One silent fall back to single-threaded.** Comlink never observes a worker that
+   fails to load — the message simply goes nowhere and the call hangs — so the bridge
+   listens for `error`/`messageerror` itself. The *first* such failure is not reported
+   to anyone: it latches `threadsBroken`, respawns with `?nothreads=1`, and re-runs the
+   same call. A slower encode beats a dead app, and "a copy of a worker script in your
+   HTTP cache predates COOP/COEP" is not something a user can act on. Only a failure
+   *after* the latch surfaces, as a `WorkerLoadError`. The latch is one-way and
+   per-bridge; there is no third attempt.
+
+   `decode` opts out of the retry (`retryable: false`): its `ArrayBuffer` was
+   transferred into the dead worker and is detached, so a second attempt would throw
+   `DataCloneError` over the real reason. It costs nothing — jSquash ships `_mt` builds
+   for *encoders* only, so a decode never reaches the code path the retry exists for.
+
+   The failure event is read structurally rather than with `instanceof ErrorEvent`, and
+   a bare `Event` is translated instead of stringified: `String(event)` is
+   `"[object Event]"`, which is precisely the message that made the production outage
+   undiagnosable for as long as it lasted.
 
 Because terminate throws away every warm codec in that worker, **each editor side gets
 its own bridge** — otherwise aborting side 1's slider drag would discard side 0's
@@ -448,6 +475,32 @@ express. The worker source is `src/lib/shell/sw.ts`.
    `squish-wasm-codecs` cache (32 entries, one-year expiry). Codec payloads are large
    and only some are used per session, so the first pick of a codec pays for the fetch
    once and every load after is instant and offline-safe.
+
+**Both tiers carry an admission guard, and both are there because of the same outage.**
+
+The precache tier re-issues every install-time fetch as `cache: 'reload'` and, during
+`install` only, reports a cached response with no `Cross-Origin-Embedder-Policy` as a
+*miss*. Workbox itself sets `reload` only for entries that carry a revision
+(`entry.revision ? 'reload' : 'default'` in `PrecacheController.install`), and
+content-hashed assets are emitted with `revision: null` — so it reads them straight out
+of the HTTP cache. A returning visitor whose year-old `immutable` copy of
+`avif_enc_mt.worker-<hash>.js` predates COOP/COEP therefore had that copy faithfully
+re-precached on every install, forever, and no reload could dislodge it. Reporting the
+miss is what forces the refetch; `reload` is what also rewrites the HTTP cache entry,
+which matters because emscripten's `new Worker()` fetches that URL itself, outside
+anything the service worker mediates. The miss is scoped to `install` deliberately —
+rejecting a header-less entry at runtime would fall through to the network and make
+every offline load a hard failure.
+
+The codec tier checks the *body* against what the URL asked for: `application/wasm` for
+`.wasm`, something JavaScript-shaped otherwise, plus `CacheableResponsePlugin({ statuses:
+[200] })`. `CacheFirst` is the one workbox strategy with no default cacheability check —
+`NetworkFirst` and `StaleWhileRevalidate` both unshift `cacheOkAndOpaquePlugin`, this one
+caches whatever comes back — so an HTML fallback served under a codec's URL would be
+pinned there for a year and returned ahead of the network on every later visit.
+`cleanupOutdatedCaches()` would never sweep it: that only removes precaches from an older
+workbox *major* and never touches `squish-wasm-codecs`. Failing closed costs at most one
+refetch per session, since `CacheFirst` still returns the live response.
 
 `registerType: 'prompt'`: a new worker installs and waits, and only takes over when the
 user clicks Reload in `UpdateToast.svelte`, which posts `SKIP_WAITING` to the waiting

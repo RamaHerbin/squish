@@ -22,6 +22,7 @@ import * as Comlink from 'comlink';
 
 import {
   fromTransferable,
+  SINGLE_THREADED_PARAM,
   toTransferable,
   transferListFor,
   type AnyEncoderOptions,
@@ -40,12 +41,95 @@ import {
 import { applyNestedWorkerWorkaround } from './capabilities';
 import { rotateTransferable } from './rotate';
 
+/* -------------------------------------------------------------------------- */
+/* Threading decision                                                          */
+/* -------------------------------------------------------------------------- */
+
 /**
- * Safari 16.0–16.3 reports wasm threads support but cannot spawn the nested
- * workers emscripten's pthread pool needs. Run before any codec is imported —
- * jSquash decides single- vs multi-threaded at init time and never revisits it.
+ * Did the bridge ask for the single-threaded builds?
+ *
+ * It says so by putting `?nothreads=1` on this worker's own URL, which is the
+ * only channel available: jSquash picks the threaded or single-threaded build
+ * when a codec first initialises and never revisits it, so the choice has to be
+ * made before the first `import()` — i.e. in a *fresh* worker, before any
+ * message could have arrived. See `bridge.ts` for what makes it ask.
  */
-applyNestedWorkerWorkaround();
+function forcedSingleThreaded(): boolean {
+  if (typeof location === 'undefined') return false;
+  try {
+    return new URLSearchParams(location.search).get(SINGLE_THREADED_PARAM) === '1';
+  } catch {
+    return false;
+  }
+}
+
+const singleThreaded = forcedSingleThreaded();
+
+/**
+ * Run before any codec is imported. Unforced this only catches Safari 16.0–16.3
+ * (threads without nested workers); forced, it is the bridge's retry after a
+ * nested worker was refused at runtime.
+ */
+const workaroundApplied = applyNestedWorkerWorkaround(singleThreaded);
+
+/* -------------------------------------------------------------------------- */
+/* Failure reporting                                                           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Narrow view of the worker global, and of the event it hands us. Typing both
+ * locally sidesteps the `lib: ["DOM", "WebWorker"]` overlap (same trick as
+ * `metrics.worker.ts`) and keeps every field optional, because the interesting
+ * failure is precisely the one that fills none of them in.
+ */
+interface UncaughtErrorEvent {
+  readonly type: string;
+  readonly message?: string;
+  readonly filename?: string;
+  readonly lineno?: number;
+  readonly colno?: number;
+  readonly error?: unknown;
+}
+
+interface ErrorReportingScope {
+  addEventListener(type: 'error', listener: (event: UncaughtErrorEvent) => void): void;
+}
+
+/** `String(event)` is `[object Event]`; say which event, at least. */
+function describeThrown(value: unknown): string {
+  if (value instanceof Error) return `${value.name}: ${value.message}`;
+  if (typeof Event !== 'undefined' && value instanceof Event) {
+    return `a bare "${value.type}" event — the browser refused a script and gave no reason`;
+  }
+  return String(value);
+}
+
+/**
+ * Emscripten's pthread bootstrap installs `worker.onerror = e => { throw e }`,
+ * so a nested worker the browser refuses to create is rethrown as the raw
+ * `Event`. By the time it crosses back to the main thread it has flattened into
+ * `"Uncaught [object Event]"`, naming neither the codec nor the script. Log the
+ * fields the browser *did* fill in — `filename` is what identifies the failing
+ * codec chunk — before that happens.
+ *
+ * Deliberately does not `preventDefault()`: the event has to keep propagating
+ * to the bridge, which is what retries the call on the single-threaded builds.
+ */
+if (typeof self !== 'undefined') {
+  (self as unknown as ErrorReportingScope).addEventListener('error', (event) => {
+    console.error('[pinch] codec worker error', {
+      type: event.type,
+      message: event.message || '(none — the script never ran)',
+      script: event.filename || '(unknown)',
+      position: `${event.lineno ?? 0}:${event.colno ?? 0}`,
+      thrown: describeThrown(event.error),
+      // The threading decision this worker started with, so the log says
+      // whether this is the first attempt or the bridge's fallback.
+      singleThreaded,
+      workaroundApplied,
+    });
+  });
+}
 
 /* -------------------------------------------------------------------------- */
 /* Module cache                                                                */

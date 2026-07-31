@@ -15,6 +15,12 @@ import { expect, test, type Page } from '@playwright/test';
  * Runs against `vite preview` (see playwright.config.ts), which sends COOP/COEP,
  * so `crossOriginIsolated` is true and jSquash loads its threaded builds — the
  * ones that break.
+ *
+ * "An output landed" is deliberately not the whole test. Two recovery paths can
+ * produce a perfectly good file from a broken codec: the browser-encoder
+ * fallback (caught by the `browser encoder` meta assertion) and the bridge's
+ * silent single-threaded retry (caught by the thread-pool assertions at the
+ * end). Both have to be closed or the suite goes green on a degraded app.
  */
 
 const FIXTURE = fileURLToPath(new URL('../public/demo/demo-gradient.jpg', import.meta.url));
@@ -26,6 +32,25 @@ const WASM_CODECS = ['AVIF', 'JPEG XL', 'WebP', 'MozJPEG', 'OxiPNG'] as const;
 /** Console/page errors that mean conversion actually broke (not incidental noise). */
 const FATAL = [/worker sent an error/i, /reading 'id'/, /WorkerLoadError/, /WorkerTimeoutError/, /pthread/i];
 
+/**
+ * The three threaded codecs, and the script only their *threaded* build spawns.
+ *
+ * jSquash chooses between the `_mt` and plain builds from `SharedArrayBuffer`
+ * alone, at first init, and never revisits it — so the presence of a thread-pool
+ * bootstrap is decisive proof of which build was instantiated.
+ * `avif_enc_mt.worker` / `jxl_enc_mt_simd.worker` are emscripten's pthread
+ * bootstrap; `workerHelpers.worker` is wasm-bindgen-rayon's, shipped only in
+ * OxiPNG's `pkg-parallel`. The single-threaded builds spawn nothing at all.
+ *
+ * WebP and MozJPEG ship no threaded build, so there is nothing to check for them
+ * — which is also why they kept working in production while these three died.
+ */
+const THREAD_POOL_SCRIPTS: readonly (readonly [codec: string, script: RegExp])[] = [
+  ['AVIF', /\/avif_enc_mt\.worker-/],
+  ['JPEG XL', /\/jxl_enc_mt(_simd)?\.worker-/],
+  ['OxiPNG', /\/workerHelpers\.worker-/],
+];
+
 test('converts a JPEG with every core wasm codec', async ({ page }) => {
   const fatal: string[] = [];
   const record = (text: string) => {
@@ -35,6 +60,14 @@ test('converts a JPEG with every core wasm codec', async ({ page }) => {
     if (msg.type() === 'error') record(msg.text());
   });
   page.on('pageerror', (err) => record(String(err)));
+
+  // Every script the page pulls in, however it pulls it in. Nested pthread
+  // workers surface on both channels in Chromium but not dependably on the same
+  // one — wasm-bindgen-rayon's helper only ever showed up as a worker, never as
+  // a request — so watch both and match the union.
+  const observed: string[] = [];
+  page.on('worker', (worker) => observed.push(worker.url()));
+  page.on('request', (request) => observed.push(request.url()));
 
   await page.goto('/');
 
@@ -66,6 +99,32 @@ test('converts a JPEG with every core wasm codec', async ({ page }) => {
   }
 
   expect(fatal, `fatal console/page errors during conversion:\n${fatal.join('\n')}`).toEqual([]);
+
+  // Everything above passes on a quietly degraded app. When a worker fails to
+  // load, `bridge.ts` latches threads off and silently re-runs the call on a
+  // codec worker respawned with `?nothreads=1`; that worker deletes
+  // `SharedArrayBuffer` so jSquash selects the single-threaded builds. Output
+  // still lands, from the real wasm codec, several times slower — no error, no
+  // `browser encoder` tag, nothing the assertions above can see. Which means the
+  // isolation check at the top now only proves threads were *available*. Prove
+  // they were used.
+
+  // `nothreads` is `SINGLE_THREADED_PARAM` in src/lib/codecs/capabilities.ts,
+  // spelled out rather than imported so the suite does not reach past a
+  // feature's `index.ts` for a constant it does not export.
+  const degraded = observed.filter((url) => url.includes('nothreads=1'));
+  expect(
+    degraded,
+    `the bridge latched single-threaded mode — a worker died:\n${degraded.join('\n')}`,
+  ).toEqual([]);
+
+  for (const [codec, script] of THREAD_POOL_SCRIPTS) {
+    expect(
+      observed.some((url) => script.test(url)),
+      `${codec} started no wasm thread pool (nothing matching ${script}) — it ran on the ` +
+        'single-threaded build, so the threaded path this suite exists to guard was never taken',
+    ).toBe(true);
+  }
 });
 
 type Signals = {

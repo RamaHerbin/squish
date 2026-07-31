@@ -54,9 +54,27 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   before it bundles anything.
 - Home navigation links render in Archivo instead of Space Mono.
 - Canonical domain is <https://pinch.rama.app>.
+- CI now checks the deployment itself. `scripts/verify-deploy.mjs` fetches every worker
+  script and every `.wasm` file of the build it just made from the deployed URL and fails
+  on a missing `require-corp`, an HTML content type or a 404 — breakage that only exists
+  on the real host with real caches, and that `vite preview` can never reproduce.
+- Every response now carries `Cross-Origin-Resource-Policy: same-origin`, so other sites
+  can no longer hotlink `/og.png`, the icons or the demo samples as a subresource. Link
+  previews are unaffected — social crawlers fetch `og:image` server-side.
 
 ### Fixed
 
+- AVIF, JPEG XL and OxiPNG failed for long-returning visitors while WebP and MozJPEG kept
+  working — the three that have threaded wasm builds. Their emscripten pthread scripts are
+  content-hashed and served `immutable, max-age=1y`, so a browser that fetched them before
+  COOP/COEP shipped kept a copy with no `Cross-Origin-Embedder-Policy` header, which a
+  cross-origin-isolated page refuses to instantiate. The server was always correct; only
+  the cached copies were not, which is why reloading never helped. Fixed at three levels:
+  the service worker now refetches precache entries with `cache: 'reload'` and rejects a
+  cached one missing the header at install time, the codec bridge falls back to the
+  single-threaded builds instead of dying when a worker script is refused, and a missing
+  `/assets/*` path no longer answers with the SPA shell — an HTML document served under a
+  hashed script URL is the other way to poison the same cache.
 - The update toast's **Reload** button now actually reloads. A waiting service worker was
   told to activate but the page was never refreshed, so the new version only appeared on
   the next manual reload.
