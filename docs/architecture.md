@@ -568,7 +568,7 @@ out in the comparison.
 intercept needs a real `fetch` handler that `generateSW`'s declarative config cannot
 express. The worker source is `src/lib/shell/sw.ts`.
 
-**Two cache tiers**, mirroring Squoosh's `to-cache.ts` split:
+**Three cache tiers**, extending Squoosh's `to-cache.ts` split:
 
 1. **Shell precache** — JS, CSS, HTML, icons and the manifest, listed at build time by
    `injectManifest.globPatterns`, with a 5 MB per-file ceiling. This is what makes the
@@ -579,8 +579,18 @@ express. The worker source is `src/lib/shell/sw.ts`.
    `squish-wasm-codecs` cache (32 entries, one-year expiry). Codec payloads are large
    and only some are used per session, so the first pick of a codec pays for the fetch
    once and every load after is instant and offline-safe.
+3. **pdf.js runtime tier** — the renderer chunk, its worker, and the side-car
+   `cmaps/`, `wasm/` and `iccs/` directories under `assets/pdfjs/<version>/`, served
+   `CacheFirst` from a `squish-pdfjs` cache of its own (256 entries, one-year expiry).
+   Same argument as the codecs — a visitor who never opens a PDF should not pay to
+   download a renderer — but a separate cache rather than a shared one, because the
+   CMaps alone are 168 files and would evict every codec from the 32-entry tier on the
+   first CJK document. `globIgnores` keeps the worker out of the precache, where its
+   ~1.26 MB would otherwise land silently: it is under the 5 MB per-file ceiling, so
+   nothing would have complained.
 
-**Both tiers carry an admission guard, and both are there because of the same outage.**
+**Every tier carries an admission guard, and they are all there because of the same
+outage.**
 
 The precache tier re-issues every install-time fetch as `cache: 'reload'` and, during
 `install` only, reports a cached response with no `Cross-Origin-Embedder-Policy` as a
@@ -617,8 +627,10 @@ synchronously reachable from both worker and page — and 303-redirects to
 `/?share-target`. `shell/share-target.ts` reads it back on the resulting GET, deletes
 the cache entry, and cleans the marker out of the URL with `history.replaceState`.
 
-**File handling.** `file_handlers` registers every supported image type, consumed
-through `window.launchQueue`. `setConsumer` may per spec never fire on a normal
+**File handling.** `file_handlers` registers every supported image type *and*
+`application/pdf`, consumed through `window.launchQueue`; a PDF opened that way routes to
+the PDF screen rather than the editor. `share_target` accepts the same set, so a shared
+PDF reaches `routePdfs()` like a dropped one. `setConsumer` may per spec never fire on a normal
 navigation, so it is raced against a 300 ms timeout rather than awaited.
 
 **Cross-origin isolation.** `vite.config.ts` installs a plugin setting
