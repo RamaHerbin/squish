@@ -15,6 +15,7 @@ src/
    ├─ matrix/                 the codec sweep
    ├─ batch/                  queue, lanes, OPFS staging, zip export
    ├─ presets/                preset library, URL token codec
+   ├─ pdf/                    PDF analysis, recompression, page preview
    ├─ compare/                reveal divider, pinch-zoom, output canvas
    ├─ edit/                   crop/rotate UI state and geometry
    ├─ options/                encoder knobs, toolbar, advanced drawer
@@ -46,6 +47,7 @@ exactly once.
 | `worker.ts` | The worker protocol: `WorkerApi`, `WorkerBridgeApi`, `TransferableImageData`, `WorkerDecodableMimeType` |
 | `batch.ts` | `BatchItem`/`BatchQueue`, `DEFAULT_BATCH_CONCURRENCY = 4`, `BATCH_ZIP_FILENAME = 'squished.zip'` |
 | `presets.ts` | `Preset`, the URL token pipeline description, and the strict validators |
+| `pdf.ts` | `PdfImageInfo`/`PdfAnalysis`/`PdfCompressResult`, `PdfCompressSettings` + `DEFAULT_PDF_SETTINGS`, `PDF_MAX_FILE_BYTES` |
 | `pinch.ts` | Shell contracts: `AppView`, `TabsApi`, `MetricsResult`, `Verdict` + `THRESHOLDS`, matrix types, `AppSettings` |
 
 Two consequences worth knowing:
@@ -458,7 +460,109 @@ screen.
 
 ---
 
-## 8. PWA and caching
+## 8. PDF
+
+`src/lib/pdf/`. The one feature that is not an image job: a PDF is never decoded and
+re-encoded whole, it is opened, edited in place and written back. None of section 3
+applies — no diff, no debounce, no result cache. `PdfJob` (`pdf-job.svelte.ts`) is its own
+small state machine, and the honest unit of work is the *embedded image*, not the
+document, because "42% smaller" says nothing about why the other 58% stayed.
+
+The rewrite is `@cantoo/pdf-lib` plus the ordinary codec bridge:
+
+1. **`analyze.ts`** enumerates the image XObjects and asks `placement.ts` where each one is
+   drawn. `placement.ts` is a content-stream lexer, not a renderer: it tracks the CTM
+   through `cm`/`q`/`Q` to `Do`, so a 1600 px raster placed in a 5 in box is reported at its
+   *effective* DPI — the only number that says whether those pixels are wasted.
+2. **`plan.ts` is pure.** `imageSkipReason` and `resampleTarget` answer "will this image be
+   touched, and at what size" with no I/O, which is what lets the table show the entire
+   plan while the quality slider is still moving, and what makes the rules testable in Node.
+3. **`decode.ts` → bridge → `rewrite.ts`.** A `DCTDecode` stream goes to the worker's JPEG
+   decoder untouched; a `FlateDecode` one is unpacked here. The stream is replaced only when
+   the re-encode actually comes out smaller, so a run can honestly report "already tight".
+
+A refused document — encrypted, signed, unreadable — never reaches step 3 at all.
+`compressPdf` would hand it back byte-for-byte with no reason attached, which reads as a
+cheerful `0% saved` on a file we deliberately would not touch.
+
+### The page preview
+
+Bytes cannot answer "does it still look right", and a document is judged a page at a time.
+So a finished run raises a full-page before/after under the editor's own `RevealCompare`:
+page N of the original against page N of the rewrite, both under one `PinchZoomController`,
+revealed by `clip-path`. The table stays — it answers the other question, and answers it
+earlier.
+
+That needs something nothing above can do. **`@cantoo/pdf-lib` is structural**: it reads
+and rewrites objects and has no interpreter for a content stream, and `placement.ts`
+recovers CTMs, not glyphs. Drawing a page means a real renderer, which is why
+`pdfjs-dist` (Apache-2.0) is a dependency as of this feature. `src/lib/pdf/render.ts` is
+the only module allowed to import it.
+
+**It is imported dynamically.** `PdfView` is statically reachable from `App.svelte`, so a
+static import would drop ~455 KB of renderer into the entry chunk every visitor downloads,
+PDF or not. `openPdfRenderer()` imports it on first call and Rollup cuts it into a chunk of its own.
+Code-splitting alone is not enough, though: `injectManifest.globIgnores` has to exclude that
+chunk and the worker as well, exactly as it already does for heic-decode, or the shell
+precache pulls both back down for every visitor at install time. The worker arrives as a
+`?url` import — a build-time string naming an emitted asset, not code. Plain `?url` rather
+than `?worker&url`, because re-bundling renames `pdf.worker.min.mjs` to `.js`, which *is* one
+of the extensions the precache globs. And the *minified* entry point, precisely because
+`?url` copies the file verbatim with no transform: the unminified one is 2.22 MB of
+identical, self-contained code where `pdf.worker.min.mjs` is 1.26 MB.
+
+**The worker is proved, not assumed.** pdf.js does not throw when its worker fails to
+start. It warns once, imports the worker script *on the main thread*, and keeps rendering
+there — seconds of frozen UI per page, no rejection for the app to react to, and a `static`
+latch that downgrades every renderer created afterwards. That is the same silent
+degradation as the COEP-less codec workers in the next section, so `openWorker()` waits for
+the handshake and then checks that `PDFWorker.port` really is a `Worker`, rejecting with a
+`PdfWorkerError` if it is not. pdf.js only assigns that field from inside its `'test'`
+message callback, so the check is a liveness proof rather than a "did construction throw".
+`e2e/pdf.smoke.spec.ts` treats the `Setting up fake worker` warning as a fatal console
+message from the other side of the same wall.
+
+**Scale is a viewport fit, never a DPI.** Rendering "at 300 DPI" is the obvious choice and
+a trap: A4 at 300 DPI is ~8.7 M pixels, 35 MB of RGBA per side, for a raster that ends up
+in a few hundred CSS pixels. `fitScale()` takes the largest scale that fits the page into a
+1600 px box, capped at 2×, and `MAX_RENDER_PIXELS` (4 MP) backstops a caller who asks for
+more anyway. One raster serves every zoom level, since the reveal pans and zooms with a CSS
+transform. Both sides are measured from the *original* and rendered at that single scale —
+measuring each separately would let a rounding difference become a visible jump across the
+divider.
+
+The rasters live on `PdfJob`, not in the view: two pairs (`PDF_PREVIEW_CACHE_LIMIT`), the
+page on screen plus the one just left, at roughly 20 MB a pair. Nothing is rasterised
+during a run; the ceiling is a 150 MB document with hundreds of images, and the user looks
+at one page at a time.
+
+Finally, pdf.js wants side-car data no bundler can see, because the worker fetches those
+files by URL rather than importing them: `cmaps/` for CJK encodings and `wasm/` for the
+JBIG2, JPEG 2000 and colour-management decoders — which is to say, for scanned documents,
+the ones most worth compressing in the first place. `cmaps/` in particular is not optional:
+`fetchBuiltInCMap` has no `try`/`catch`, so one missing file throws per font and takes the
+page render with it. `vite.config.ts` copies them into a version-stamped `assets/pdfjs/`
+prefix — *under* `/assets/`, because `vercel.json` rewrites everything else to
+`index.html`, so a miss anywhere outside it answers `200 text/html` instead of a 404, which
+is precisely the mislabelled-body trap the next section exists to close. The version
+segment is read from the installed package, never typed, and it is what makes the
+`immutable` header on that prefix honest across a `pdfjs-dist` upgrade.
+
+Three places implement that one layout — the build (and its dev middleware), `render.ts`'s
+`pdfjsAssetUrls()`, which rebuilds the prefix from pdf.js's own exported `version`, and
+`sw.ts`'s runtime-cache route — and a disagreement between them is invisible: every fetch
+happens inside pdf.js, which runs with `ignoreErrors` on and simply drops the images or
+truncates the page. `render.test.ts` pins the URLs for that reason; no end-to-end run can,
+because the demo fixture is Latin text with DCT images and asks for neither directory.
+
+`standardFontDataUrl` (800 KB) is deliberately left unset. `fetchStandardFontData` warns
+and falls back to a system font, and this renderer only ever produces *pairs* from the same
+document, so both sides substitute the same font in the same place and the drift cancels
+out in the comparison.
+
+---
+
+## 9. PWA and caching
 
 `vite-plugin-pwa` with `strategies: 'injectManifest'`, because the share-target POST
 intercept needs a real `fetch` handler that `generateSW`'s declarative config cannot
@@ -526,15 +630,23 @@ codecs.
 
 ---
 
-## 9. Testing
+## 10. Testing
 
-`npm test` runs vitest with no browser: 400+ unit tests across 19 files, colocated with
+`npm test` runs vitest with no browser: 550+ unit tests across 30 files, colocated with
 the code they cover (`*.test.ts` next to the module). That is possible because of the
 injection discipline described above — the job engine takes a fake bridge, the matrix
-takes a fake metrics function, auto-suggest takes two fakes, and the pure modules
-(`ssim.ts`, `rotate.ts`, `reveal.ts`, `pinch-zoom.ts`, everything in `contracts/`) need
-nothing at all. One suite opts into jsdom explicitly with
+takes a fake metrics function, auto-suggest takes two fakes, `PdfJob` takes a fake
+renderer, and the pure modules (`ssim.ts`, `rotate.ts`, `reveal.ts`, `pinch-zoom.ts`,
+`pdf/plan.ts`, the `fitScale`/`clampPageIndex` half of `pdf/render.ts`, everything in
+`contracts/`) need nothing at all. One suite opts into jsdom explicitly with
 `// @vitest-environment jsdom`.
+
+What that discipline cannot reach is anything that only exists in a browser: the wasm
+codecs actually running, a service worker installing, a canvas holding pixels. Two
+Playwright smoke tests in `e2e/` cover the paths where a silent failure would still look
+like success — `codecs.smoke.spec.ts` for a codec conversion, `pdf.smoke.spec.ts` for a
+PDF end to end, the latter reading pixels back off the preview canvas because an unpainted
+one would satisfy every other assertion in the file.
 
 `npm run check` runs `svelte-check` against a strict tsconfig — `strict` plus
 `noUncheckedIndexedAccess`, `isolatedModules` and `verbatimModuleSyntax`.

@@ -4,13 +4,15 @@
  * enough: the share-target POST intercept below needs a real `fetch`
  * handler, which `generateSW`'s declarative config can't express).
  *
- * Two-tier caching, matching Squoosh's `to-cache.ts` split:
+ * Three-tier caching, extending Squoosh's `to-cache.ts` split:
  *   - shell (JS/CSS/HTML/icons) — precached via `precacheAndRoute`, listed
  *     at build time from `injectManifest.globPatterns` in vite.config.ts.
  *   - codec wasm — deliberately left OUT of that precache list (it's large
  *     and only some codecs get used per session) and instead runtime-cached
  *     `CacheFirst` below, so the first pick of a codec pays for the fetch
  *     once and every load after is instant and offline-safe.
+ *   - pdf.js — the same deal for the PDF preview's renderer, in a cache of
+ *     its own because it is a hundred times more files than the codecs are.
  */
 
 /// <reference lib="webworker" />
@@ -132,6 +134,19 @@ precacheAndRoute(self.__WB_MANIFEST, {
 clientsClaim();
 
 /**
+ * pdf.js's data files live under one versioned prefix, written by the
+ * `pdfjs-assets` plugin in vite.config.ts — 168 CMaps, three wasm decoders and
+ * a fallback ICC profile, all fetched by URL from inside the pdf.js worker.
+ */
+const PDFJS_ASSET_PREFIX = '/assets/pdfjs/';
+
+/** `assets/pdf-<hash>.js`, `assets/pdf.worker-<hash>.mjs`, `.min` variants of both. */
+const isPdfJsScript = (pathname: string): boolean => /\/pdf[-.][^/]*\.m?js$/.test(pathname);
+
+/** The subset of those that gets handed to `new Worker()`. */
+const isPdfJsWorker = (pathname: string): boolean => /\/pdf\.worker[^/]*\.m?js$/.test(pathname);
+
+/**
  * A 200 is not proof of the right body: a misrouted `.wasm` comes back as a
  * perfectly healthy 200 `text/html` (an index.html fallback), which is exactly
  * the shape that pins a year of "bad magic number" under a codec's URL. Check
@@ -143,12 +158,31 @@ clientsClaim();
  */
 const codecContentTypeGuard: WorkboxPlugin = {
   async cacheWillUpdate({ request, response }) {
+    const { pathname } = new URL(request.url);
     const contentType = response.headers.get('content-type')?.toLowerCase() ?? '';
-    const expectsWasm = new URL(request.url).pathname.endsWith('.wasm');
-    const matches = expectsWasm
-      ? contentType.startsWith('application/wasm')
-      : contentType.includes('javascript');
-    return matches ? response : null;
+    if (pathname.endsWith('.wasm')) {
+      return contentType.startsWith('application/wasm') ? response : null;
+    }
+    if (pathname.endsWith('.js') || pathname.endsWith('.mjs')) {
+      // pdf.js's worker is spawned with a real `new Worker()`, so a copy
+      // admitted without a header this `require-corp` page accepts would be
+      // refused by the browser on every later load — for the whole year of the
+      // TTL below, with no reload able to clear it. `precacheCoepRepair` is the
+      // repair pass for that mistake in the precache; a runtime cache has none,
+      // so the only fix is to never write it. Nothing is lost by refusing: a
+      // response the browser won't start a worker from is worth exactly as much
+      // offline as it is online. Left off the heic chunk, which is imported
+      // rather than spawned and so has never cared.
+      const usable = !isPdfJsWorker(pathname) || coepAllowsWorker(response);
+      return contentType.includes('javascript') && usable ? response : null;
+    }
+    // `.bcmap` and `.icc` have no registered media type — hosts answer them
+    // with `application/octet-stream`, or with nothing at all — so there is no
+    // positive check to make and the original `*javascript*` fallback would
+    // have rejected every one of them. What's left to check is the one wrong
+    // body that actually turns up, the SPA fallback's `text/html`. `vercel.json`
+    // keeps `/assets/` out of that rewrite; this is the belt to those braces.
+    return contentType.startsWith('text/html') ? null : response;
   },
 };
 
@@ -156,9 +190,17 @@ registerRoute(
   // The heic-decode chunk is a ~1.4 MB JS file with the libheif wasm inlined
   // as base64 — codec-sized, so it joins the wasm runtime tier (and is
   // globIgnored from the precache manifest in vite.config.ts).
+  //
+  // pdf.js's three `.wasm` files are excluded by prefix rather than left to
+  // registration order. Workbox does match routes in the order they're
+  // registered, so putting the pdf.js route first would work — but that is a
+  // property nothing in either route states and no later edit would think to
+  // preserve, and getting it wrong burns three of the 32 entries below on a
+  // payload that has its own cache precisely so it can't.
   ({ url }) =>
-    url.pathname.endsWith('.wasm') ||
-    (url.pathname.includes('heic-decode-') && url.pathname.endsWith('.js')),
+    !url.pathname.startsWith(PDFJS_ASSET_PREFIX) &&
+    (url.pathname.endsWith('.wasm') ||
+      (url.pathname.includes('heic-decode-') && url.pathname.endsWith('.js'))),
   new CacheFirst({
     cacheName: 'squish-wasm-codecs',
     plugins: [
@@ -171,6 +213,41 @@ registerRoute(
       new CacheableResponsePlugin({ statuses: [200] }),
       codecContentTypeGuard,
       new ExpirationPlugin({ maxEntries: 32, maxAgeSeconds: 60 * 60 * 24 * 365 }),
+    ],
+  }),
+);
+
+/**
+ * pdf.js gets a tier of its own, for the codecs' reason and then one more.
+ *
+ * Its payload comes in three shapes: the ~430 KB library chunk, the ~2 MB
+ * worker script, and the data files under `PDFJS_ASSET_PREFIX`. All of it is
+ * globIgnored from the precache — only PDF users need any of it — and none of
+ * it matches the codec route above, so without this the PDF preview would be
+ * network-only: the one view whose input is a file already sitting on the
+ * user's disk would be the one view that needs a connection.
+ *
+ * The reason it isn't simply `squish-wasm-codecs` is the entry cap. That cache
+ * allows 32, sized for a dozen-odd codec binaries that are each fetched once
+ * and kept forever. pdf.js can ask for CMaps by the handful per document and
+ * would walk past 32 in a session of CJK files, evicting every codec the user
+ * had warmed up — after which the two families thrash against each other
+ * indefinitely, each eviction paid for again at the next encode. One shared
+ * budget cannot serve both access patterns; two budgets cost one cache name.
+ */
+registerRoute(
+  ({ url }) => url.pathname.startsWith(PDFJS_ASSET_PREFIX) || isPdfJsScript(url.pathname),
+  new CacheFirst({
+    cacheName: 'squish-pdfjs',
+    plugins: [
+      new CacheableResponsePlugin({ statuses: [200] }),
+      codecContentTypeGuard,
+      // 168 CMaps + 3 wasm + 1 ICC + the library and worker chunks is ~174 URLs
+      // for one pdfjs-dist version, and every URL here carries either a content
+      // hash or the version, so an upgrade strands the old set rather than
+      // overwriting it. 256 leaves an upgrade's overlap room to age out by LRU
+      // instead of evicting the version actually in use.
+      new ExpirationPlugin({ maxEntries: 256, maxAgeSeconds: 60 * 60 * 24 * 365 }),
     ],
   }),
 );
