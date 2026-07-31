@@ -68,10 +68,23 @@
   // svelte-ignore state_referenced_locally
   const job = createPdfJob(file);
 
+  // Compressing is what the screen is for, and the defaults are the ones the
+  // rail opens on — so run it rather than making every visit press a button to
+  // see a number. The rail stays live: changing a setting and pressing Compress
+  // again re-runs against the same analysis. A refused document never gets
+  // here, `canCompress` being false for it.
+  let mounted = true;
   onMount(() => {
-    void job.analyze();
+    void job.analyze().then(() => {
+      // `analyze` is awaited, so the view may already be gone — and `dispose`
+      // does not move the phase, so `canCompress` alone would still say yes.
+      if (mounted && job.canCompress) void job.compress();
+    });
   });
-  onDestroy(() => job.dispose());
+  onDestroy(() => {
+    mounted = false;
+    job.dispose();
+  });
 
   /* ------------------------------------------------------------------ */
   /* Derived                                                             */
@@ -318,10 +331,6 @@
         <StatCell label="Images found" value={analysis ? String(images.length) : '—'} />
         <div class="divider" aria-hidden="true"></div>
         <StatCell label="Image bytes" value={analysis ? formatBytes(analysis.imageBytes) : '—'} />
-      </div>
-      <div class="stats-end">
-        <span class="file-name mono truncate" title={file.name}>{file.name}</span>
-        <button type="button" class="close" onclick={onclose}>Close</button>
       </div>
     </header>
 
@@ -681,39 +690,6 @@
     background: var(--hairline);
   }
 
-  .stats-end {
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: var(--space-4);
-    max-width: 34%;
-    padding-inline: var(--space-6);
-  }
-
-  .file-name {
-    font-size: var(--fs-mono-md);
-    color: var(--muted);
-  }
-
-  .close {
-    flex: none;
-    height: var(--h-control);
-    padding-inline: var(--space-4);
-    border: var(--border-hairline);
-    border-radius: var(--radius-pill);
-    background: var(--surface);
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: var(--fs-mono-sm);
-    letter-spacing: var(--tracking-mono);
-    text-transform: uppercase;
-  }
-
-  .close:hover {
-    color: var(--ink);
-    background: var(--cream);
-  }
-
   .banner {
     flex: none;
     padding: var(--space-3) var(--space-6);
@@ -1053,14 +1029,6 @@
       padding: var(--space-4) var(--space-5);
     }
 
-    .stats-end {
-      max-width: none;
-      padding-inline: var(--space-5);
-    }
-
-    .file-name {
-      display: none;
-    }
 
     .rail {
       grid-template-columns: 1fr;

@@ -6,9 +6,9 @@ import { expect, test, type Locator } from '@playwright/test';
  * PDF conversion smoke test.
  *
  * Loads a real PDF through the home file picker, lets the app route it to the
- * PDF view, waits for the embedded-image analysis to populate, runs one
- * compress pass, checks the before/after page preview, and downloads the
- * result. This is the regression net for "a merged PR silently broke the PDF
+ * PDF view, waits for the embedded-image analysis to populate and for the
+ * compress pass the view starts on its own, checks the before/after page
+ * preview, and downloads the result. This is the regression net for "a merged PR silently broke the PDF
  * pipeline", and it covers two paths that unit tests cannot reach: the
  * pdf-lib decode-and-rewrite, which only does real work when the wasm codecs
  * actually run, and the pdf.js page preview, which needs a worker and a canvas.
@@ -112,14 +112,16 @@ test('converts a PDF end to end', async ({ page }) => {
   const figure = page.locator('.pdf-result .figure');
   const preview = page.locator('.pdf-preview');
 
-  // A before/after needs both documents, so the stage must not exist yet.
-  await expect(preview, 'no preview before there is anything to compare').toHaveCount(0);
-
-  // Do not toggle the SSIM measure checkbox — keep the run fast and deterministic.
-  await trigger.click();
-
+  // Nothing is clicked to get here: the view compresses on mount, at the
+  // defaults the rail opens on. Do not press Compress while that run is in
+  // flight — the button is a toggle and would abort it. Do not toggle the SSIM
+  // measure checkbox either; keep the run fast and deterministic.
   await expect(download).toBeEnabled({ timeout: 45_000 });
   await expect(figure).toHaveText(/\d/, { timeout: 45_000 });
+
+  // The button is now a re-run: it has to come back armed once the automatic
+  // pass lands, or changing a setting would leave no way to act on it.
+  await expect(trigger, 'Compress should re-arm after the run on mount').toBeEnabled();
 
   // ------------------------------------------------------------- preview
   // The table above can only say that a stream was replaced. Whether the page
