@@ -4,11 +4,33 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Vercel's Git integration reports every deployment back to GitHub, and the
+  # payload carries its URL. It is the only event where "what is deployed" and
+  # "what this repo builds" are the same commit, which is exactly what the
+  # deploy job needs. GitHub runs the default branch's copy of a workflow for
+  # `deployment_status`, so edits to that job take effect on merge, not on the
+  # pull request making them.
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      deploy_url:
+        description: 'Origin to verify, e.g. https://pinch.rama.app. Empty skips the deploy job.'
+        required: false
+        default: ''
 
 # A force-push supersedes the previous run on the same ref; don't keep
-# burning a runner on the commit nobody is looking at any more.
+# burning a runner on the commit nobody is looking at any more. The event is
+# part of the group so that a deployment_status arriving mid-build cannot
+# cancel the push run it was triggered by — same ref, unrelated work.
 concurrency:
-  group: ci-${{ github.ref }}
+  # `deployment_status` keys on the deployment's own URL as well, because Vercel
+  # posts one status per environment for the same ref: a Production event landing
+  # while the Preview one is still fetching assets would otherwise cancel it, and
+  # a cancelled run is not a failed run — the verification would silently never
+  # have happened. Every other event still collapses per ref as before.
+  group: >-
+    ci-${{ github.event_name }}-${{ github.ref }}-${{
+      github.event.deployment_status.environment_url }}
   cancel-in-progress: true
 
 permissions:
@@ -17,6 +39,10 @@ permissions:
 jobs:
   verify:
     name: check / test / build
+    # These describe a commit, and a deployment_status carries a commit that has
+    # already been through them. Without this, Vercel's several status updates
+    # per deploy would each re-run the whole matrix.
+    if: github.event_name != 'deployment_status'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,6 +66,7 @@ jobs:
 
   e2e:
     name: e2e (codec smoke)
+    if: github.event_name != 'deployment_status'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -74,3 +101,45 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  deploy:
+    name: deploy (asset headers)
+    # Runs only when there is something deployed to look at: a successful
+    # deployment_status that carries a URL, or a URL typed into a manual run.
+    # Every other trigger skips the job rather than failing it — an ordinary PR
+    # has no deployment, and a check that goes red for the absence of its
+    # subject is a check people learn to ignore.
+    #
+    # Preview deployments are included on purpose: they are where a vercel.json
+    # change can be caught before it reaches production. An access-protected
+    # preview answers 401 on every path, which the script reports and exits 0 on.
+    if: >-
+      (github.event_name == 'deployment_status'
+      && github.event.deployment_status.state == 'success'
+      && github.event.deployment_status.environment_url != '')
+      || (github.event_name == 'workflow_dispatch' && inputs.deploy_url != '')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # The script asks the deploy for the exact filenames this commit emits, so
+      # dist/ has to exist and has to be the build of the deployed commit —
+      # which is what `deployment_status` guarantees (it checks out the
+      # deployment's SHA) and a hand-typed URL does not.
+      - name: Build
+        run: npm run build
+
+      # Through the environment, not string interpolation: the URL comes from a
+      # webhook payload and must never be spliced into a shell command.
+      - name: Verify deployed assets
+        env:
+          DEPLOY_URL: ${{ inputs.deploy_url || github.event.deployment_status.environment_url }}
+        run: node scripts/verify-deploy.mjs "$DEPLOY_URL"

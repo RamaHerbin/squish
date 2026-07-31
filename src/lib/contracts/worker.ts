@@ -208,3 +208,16 @@ export interface WorkerBridgeApi {
 
 /** Factory so tests can inject a fake bridge. */
 export type CreateWorkerBridge = () => WorkerBridgeApi;
+
+/**
+ * Query parameter the bridge appends to the codec worker's URL to demand the
+ * single-threaded wasm builds — see `codecs/capabilities.ts`
+ * `applyNestedWorkerWorkaround`.
+ *
+ * It lives in contracts because three realms that cannot import each other all
+ * need to agree on it: `codecs/bridge.ts` writes it, `codecs/codec.worker.ts`
+ * reads it, and `shell/sw.ts` must strip it before a precache lookup — a
+ * service worker importing anything from `codecs/` would drag the whole codec
+ * graph into the service-worker bundle.
+ */
+export const SINGLE_THREADED_PARAM = 'nothreads';
