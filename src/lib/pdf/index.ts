@@ -20,7 +20,14 @@
 
 export { default as PdfView } from './PdfView.svelte';
 
-export { createPdfJob, type PdfJob, type PdfPhase } from './pdf-job.svelte';
+export {
+  cachePreviewPages,
+  createPdfJob,
+  PDF_PREVIEW_CACHE_LIMIT,
+  type PdfJob,
+  type PdfPhase,
+  type PdfPreviewPage,
+} from './pdf-job.svelte';
 
 export { analyzePdf } from './analyze';
 export { compressPdf, type PdfCompressDeps } from './compress';

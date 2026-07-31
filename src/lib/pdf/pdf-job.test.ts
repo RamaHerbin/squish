@@ -1,11 +1,15 @@
 /**
- * `createPdfJob` — the phase machine, with both engine calls injected.
+ * `createPdfJob` — the phase machine, with every engine call injected.
  *
  * Same technique as `compress.test.ts`: no canvas, no worker, no real PDF. The
  * point of these tests is the state transitions, and above all the two that
  * would lie to the user if they broke — a refused document must never reach
  * `compressPdf` (which reports refusals as a silent 0% saving), and pressing
  * Stop must not look like a failure.
+ *
+ * The preview half is here for the same reason: what it must never do is hold
+ * pixels it is not showing, keep rendering a page the user has left, or hand
+ * pdf.js the very buffer the download button is going to write.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -20,7 +24,14 @@ import type {
 } from '../contracts';
 
 import type { compressPdf } from './compress';
-import { createPdfJob, pdfRefusalMessage, type PdfJob } from './pdf-job.svelte';
+import {
+  cachePreviewPages,
+  createPdfJob,
+  pdfRefusalMessage,
+  PDF_PREVIEW_CACHE_LIMIT,
+  type PdfJob,
+} from './pdf-job.svelte';
+import type { PdfRenderer, RenderedPage } from './render';
 
 /* -------------------------------------------------------------------------- */
 /* Fixtures                                                                    */
@@ -93,6 +104,81 @@ function abortableCompress(): typeof compressPdf {
 /** Let the job get past `file.arrayBuffer()` and into the injected engine. */
 function tick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
+ * A pair of documents that rasterise nothing.
+ *
+ * Node has no `ImageData` and the job only ever passes the pixels through, so
+ * the pages are empty objects; what the fake actually records is the traffic —
+ * which buffers were opened, which pages were asked for, how many handles were
+ * closed.
+ */
+function fakeRenderers(
+  options: {
+    pageCount?: number;
+    /** Never settle this page, so an abort has something to cancel. */
+    hangOn?: number;
+    /** Reject this page with a message. */
+    failOn?: number;
+    /** Take a turn of the event loop to open, so teardown can race it. */
+    slowOpen?: boolean;
+  } = {},
+) {
+  const pageCount = options.pageCount ?? 3;
+  const opened: ArrayBuffer[] = [];
+  /** `${document}:${page}`, in call order. Document 0 is the original. */
+  const rendered: string[] = [];
+  let destroyed = 0;
+
+  const open = async (bytes: ArrayBuffer): Promise<PdfRenderer> => {
+    const doc = opened.length;
+    opened.push(bytes);
+    if (options.slowOpen) await tick();
+
+    const renderer: PdfRenderer = {
+      pageCount,
+      pageSize: async () => ({ width: 595, height: 842 }),
+      render: (signal, pageIndex) => {
+        rendered.push(`${doc}:${pageIndex}`);
+        if (pageIndex === options.failOn) return Promise.reject(new Error('page is broken'));
+        if (pageIndex !== options.hangOn) {
+          return Promise.resolve<RenderedPage>({ data: {} as ImageData, width: 8, height: 8 });
+        }
+        return new Promise<RenderedPage>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(abortError()));
+        });
+      },
+      destroy: () => {
+        destroyed += 1;
+      },
+    };
+    return renderer;
+  };
+
+  return {
+    open,
+    opened,
+    rendered,
+    get destroyed(): number {
+      return destroyed;
+    },
+  };
+}
+
+/** A job parked in `done`, ready to preview `pageCount` pages. */
+async function previewJob(
+  renderers: ReturnType<typeof fakeRenderers>,
+  pageCount = 3,
+): Promise<PdfJob> {
+  const job = createPdfJob(pdfFile(), {
+    analyze: fakeAnalyze(analysisOf([imageInfo('4 0 R')], pageCount)),
+    compress: async () => resultOf(1200),
+    openRenderer: renderers.open,
+  });
+  await job.analyze();
+  await job.compress();
+  return job;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -421,5 +507,329 @@ describe('PdfJob.compress', () => {
     expect(() => job.abort()).not.toThrow();
     expect(() => job.dispose()).not.toThrow();
     expect(job.phase).toBe('ready');
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Preview cache                                                               */
+/* -------------------------------------------------------------------------- */
+
+describe('cachePreviewPages', () => {
+  it('puts the newest pair at the head', () => {
+    expect(cachePreviewPages([{ pageIndex: 0 }], { pageIndex: 1 })).toEqual([
+      { pageIndex: 1 },
+      { pageIndex: 0 },
+    ]);
+  });
+
+  it('evicts past the ceiling — two pairs is already ~40 MB', () => {
+    let cache: Array<{ pageIndex: number }> = [];
+    for (const pageIndex of [0, 1, 2]) cache = cachePreviewPages(cache, { pageIndex });
+
+    expect(PDF_PREVIEW_CACHE_LIMIT).toBe(2);
+    expect(cache).toEqual([{ pageIndex: 2 }, { pageIndex: 1 }]);
+  });
+
+  it('moves a hit back to the head instead of duplicating it', () => {
+    const cache = cachePreviewPages([{ pageIndex: 1 }, { pageIndex: 0 }], { pageIndex: 0 });
+
+    expect(cache).toEqual([{ pageIndex: 0 }, { pageIndex: 1 }]);
+  });
+
+  it('never mutates the array it was handed', () => {
+    const cache = [{ pageIndex: 0 }];
+    cachePreviewPages(cache, { pageIndex: 1 });
+
+    expect(cache).toEqual([{ pageIndex: 0 }]);
+  });
+
+  it('holds nothing at all when the limit is zero', () => {
+    expect(cachePreviewPages([{ pageIndex: 0 }], { pageIndex: 1 }, 0)).toEqual([]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Preview                                                                     */
+/* -------------------------------------------------------------------------- */
+
+describe('PdfJob.showPage', () => {
+  it('renders both documents and hands over the pair', async () => {
+    const renderers = fakeRenderers();
+    const job = await previewJob(renderers);
+
+    expect(job.pageCount).toBe(3);
+    expect(job.canPreview).toBe(true);
+    await job.showPage(0);
+
+    expect(job.preview?.pageIndex).toBe(0);
+    expect(job.preview?.original.width).toBe(8);
+    expect(job.preview?.output.width).toBe(8);
+    expect(job.previewLoading).toBe(false);
+    expect(job.previewError).toBeUndefined();
+    expect(renderers.rendered).toEqual(['0:0', '1:0']);
+  });
+
+  it('renders nothing during compression — the pixels are pulled on demand', async () => {
+    const renderers = fakeRenderers();
+    await previewJob(renderers);
+
+    expect(renderers.opened).toHaveLength(0);
+    expect(renderers.rendered).toEqual([]);
+  });
+
+  it('clamps out of range, so the view can wire its arrows to ±1', async () => {
+    const renderers = fakeRenderers();
+    const job = await previewJob(renderers);
+
+    await job.showPage(9);
+    expect(job.previewPage).toBe(2);
+
+    await job.showPage(-4);
+    expect(job.previewPage).toBe(0);
+  });
+
+  it('shows nothing until there is an output to compare against', async () => {
+    const renderers = fakeRenderers();
+    const job = createPdfJob(pdfFile(), {
+      analyze: fakeAnalyze(analysisOf([imageInfo('4 0 R')], 3)),
+      openRenderer: renderers.open,
+    });
+    await job.analyze();
+
+    await job.showPage(1);
+
+    expect(job.canPreview).toBe(false);
+    expect(job.preview).toBeUndefined();
+    expect(job.previewLoading).toBe(false);
+    expect(renderers.opened).toHaveLength(0);
+    // The number still moves: the page selector is usable before a run.
+    expect(job.previewPage).toBe(1);
+  });
+
+  it('holds both documents open across page changes', async () => {
+    const renderers = fakeRenderers();
+    const job = await previewJob(renderers);
+
+    await job.showPage(0);
+    await job.showPage(1);
+
+    expect(renderers.opened).toHaveLength(2);
+    expect(renderers.rendered).toEqual(['0:0', '1:0', '0:1', '1:1']);
+  });
+
+  it('serves a page it has already rendered from the cache', async () => {
+    const renderers = fakeRenderers();
+    const job = await previewJob(renderers);
+
+    await job.showPage(0);
+    await job.showPage(1);
+    await job.showPage(0);
+
+    expect(renderers.rendered).toHaveLength(4);
+    expect(job.preview?.pageIndex).toBe(0);
+    expect(job.previewLoading).toBe(false);
+  });
+
+  it('re-renders a page the two-pair ceiling evicted', async () => {
+    const renderers = fakeRenderers();
+    const job = await previewJob(renderers);
+
+    for (const page of [0, 1, 2, 0]) await job.showPage(page);
+
+    expect(renderers.rendered).toEqual([
+      '0:0', '1:0',
+      '0:1', '1:1',
+      '0:2', '1:2',
+      '0:0', '1:0',
+    ]);
+  });
+
+  it('copies the output bytes — pdf.js may detach what the download writes', async () => {
+    const renderers = fakeRenderers();
+    const job = await previewJob(renderers);
+
+    await job.showPage(0);
+
+    expect(renderers.opened[1]).not.toBe(job.result?.bytes);
+    expect(renderers.opened[1]?.byteLength).toBe(job.result?.bytes.byteLength);
+  });
+
+  it('aborts the render in flight when the page changes', async () => {
+    const renderers = fakeRenderers({ hangOn: 0 });
+    const job = await previewJob(renderers);
+
+    const stale = job.showPage(0);
+    await tick();
+    expect(job.previewLoading).toBe(true);
+
+    await job.showPage(1);
+    await stale;
+
+    expect(job.preview?.pageIndex).toBe(1);
+    expect(job.previewLoading).toBe(false);
+    // Leaving a page is not a failure, exactly as Stop is not a failure.
+    expect(job.previewError).toBeUndefined();
+  });
+
+  it('reports a render failure without disturbing the result', async () => {
+    const renderers = fakeRenderers({ failOn: 1 });
+    const job = await previewJob(renderers);
+
+    await job.showPage(1);
+
+    expect(job.previewError).toBe('page is broken');
+    expect(job.preview).toBeUndefined();
+    expect(job.previewLoading).toBe(false);
+    expect(job.phase).toBe('done');
+    expect(job.result).toBeDefined();
+
+    // Asking for another page clears the sentence before it renders.
+    await job.showPage(0);
+    expect(job.previewError).toBeUndefined();
+    expect(job.preview?.pageIndex).toBe(0);
+  });
+
+  it('drops the last good page when a later one fails to render', async () => {
+    const renderers = fakeRenderers({ failOn: 1 });
+    const job = await previewJob(renderers);
+
+    await job.showPage(0);
+    expect(job.preview?.pageIndex).toBe(0);
+
+    // `previewPage` moved to 1 before the render started and the view captions
+    // the panes from it, so leaving page 0's pixels up would label them as the
+    // page that just failed.
+    await job.showPage(1);
+    expect(job.previewPage).toBe(1);
+    expect(job.previewError).toBe('page is broken');
+    expect(job.preview).toBeUndefined();
+  });
+
+  it('drops the preview and both handles when another run starts', async () => {
+    const renderers = fakeRenderers();
+    const job = await previewJob(renderers);
+    await job.showPage(1);
+
+    await job.compress();
+    await tick();
+
+    expect(job.preview).toBeUndefined();
+    expect(renderers.destroyed).toBe(2);
+    // The page survives: a re-run changes the settings, not the document.
+    expect(job.previewPage).toBe(1);
+
+    await job.showPage(1);
+    expect(renderers.opened).toHaveLength(4);
+    expect(job.preview?.pageIndex).toBe(1);
+  });
+
+  it('drops the preview when the document is analysed again', async () => {
+    const renderers = fakeRenderers();
+    const job = await previewJob(renderers);
+    await job.showPage(2);
+
+    await job.analyze();
+    await tick();
+
+    expect(job.preview).toBeUndefined();
+    expect(job.previewPage).toBe(0);
+    expect(renderers.destroyed).toBe(2);
+  });
+
+  it('destroys both documents on dispose', async () => {
+    const renderers = fakeRenderers();
+    const job = await previewJob(renderers);
+    await job.showPage(1);
+
+    job.dispose();
+    await tick();
+
+    expect(renderers.destroyed).toBe(2);
+    expect(job.preview).toBeUndefined();
+  });
+
+  it('opens again after a failed open, instead of replaying the rejection', async () => {
+    // The failures this guards against are transient by nature — a chunk that
+    // 404s mid-deploy, a `PdfWorkerError` from a worker cached without the
+    // COEP header — and their message tells the user to reload and try again.
+    // Caching the rejected promise would make every later arrow press reproduce
+    // it with no attempt at all, and only a recompress could clear it.
+    const working = fakeRenderers();
+    let attempts = 0;
+    const openRenderer = async (bytes: ArrayBuffer): Promise<PdfRenderer> => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('worker would not start');
+      return working.open(bytes);
+    };
+
+    const job = createPdfJob(pdfFile(), {
+      analyze: fakeAnalyze(analysisOf([imageInfo('4 0 R')], 3)),
+      compress: async () => resultOf(1200),
+      openRenderer,
+    });
+    await job.analyze();
+    await job.compress();
+
+    await job.showPage(0);
+    expect(job.previewError).toBe('worker would not start');
+    expect(job.preview).toBeUndefined();
+
+    await job.showPage(1);
+    expect(job.previewError).toBeUndefined();
+    expect(job.preview?.pageIndex).toBe(1);
+  });
+
+  it('stops the sibling render when one side of the pair fails', async () => {
+    // `Promise.all` rejects on the first rejection and leaves the other render
+    // running: rAF slices on the UI thread, ending in a multi-megabyte readback
+    // for a page the user has already been told failed.
+    let opened = 0;
+    let aborted = false;
+    const openRenderer = async (): Promise<PdfRenderer> => {
+      // Document 0 is the original, as everywhere else here: it fails the page,
+      // and the output side hangs until something aborts it.
+      const doc = opened++;
+      return {
+        pageCount: 3,
+        pageSize: async () => ({ width: 595, height: 842 }),
+        render: (signal, pageIndex) =>
+          doc === 0 && pageIndex === 1
+            ? Promise.reject(new Error('page is broken'))
+            : new Promise<RenderedPage>((_resolve, reject) => {
+                signal.addEventListener('abort', () => {
+                  aborted = true;
+                  reject(abortError());
+                });
+              }),
+        destroy: () => undefined,
+      };
+    };
+
+    const job = createPdfJob(pdfFile(), {
+      analyze: fakeAnalyze(analysisOf([imageInfo('4 0 R')], 3)),
+      compress: async () => resultOf(1200),
+      openRenderer,
+    });
+    await job.analyze();
+    await job.compress();
+
+    await job.showPage(1);
+
+    expect(job.previewError).toBe('page is broken');
+    expect(aborted).toBe(true);
+  });
+
+  it('closes documents that were still opening when the job was disposed', async () => {
+    const renderers = fakeRenderers({ slowOpen: true });
+    const job = await previewJob(renderers);
+
+    const showing = job.showPage(0);
+    job.dispose();
+    await showing;
+    await tick();
+
+    expect(renderers.opened).toHaveLength(2);
+    expect(renderers.rendered).toEqual([]);
+    expect(renderers.destroyed).toBe(2);
   });
 });

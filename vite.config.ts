@@ -1,5 +1,7 @@
 /// <reference types="vitest/config" />
-import { readFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
@@ -23,6 +25,151 @@ function crossOriginIsolation(): Plugin {
       server.middlewares.use((_req, res, next) => {
         setHeaders(res);
         next();
+      });
+    },
+  };
+}
+
+/**
+ * pdf.js's runtime data files.
+ *
+ * `pdfjs-dist` ships three directories that its worker fetches BY URL instead
+ * of importing — `cmaps/` (the predefined CJK character maps), `wasm/` (the
+ * JBIG2 and JPEG 2000 image decoders, plus qcms for ICC colour management) and
+ * `iccs/` (the fallback CMYK profile). Nothing in the module graph references
+ * them, so the bundler never sees them and nothing puts them in `dist/`.
+ *
+ * They land under `/assets/` on purpose, not a top-level `/pdfjs/`.
+ * `vercel.json` rewrites `/((?!assets/).*)` to `index.html`, so a miss anywhere
+ * else answers 200 `text/html` — exactly the mislabelled-body poisoning that
+ * `src/lib/shell/sw.ts` documents at length and now guards against. Under
+ * `/assets/` a miss is a 404, and the `immutable, max-age=1y` header already
+ * declared for that prefix applies for free.
+ *
+ * The version segment is what makes `immutable` honest. These filenames are
+ * fixed upstream (`pdf.worker.mjs` hardcodes `qcms_bg.wasm`), so they can't be
+ * content-hashed like everything else under `/assets/`; without it a
+ * `pdfjs-dist` upgrade would serve new bytes at a URL that both the browser and
+ * the service worker had pinned for a year, to a freshly-hashed worker that no
+ * longer matches them. The version is read out of the installed package, never
+ * typed — same rule as the app's own.
+ *
+ * `src/lib/pdf/render.ts` builds the same URLs from pdf.js's own exported
+ * `version`; `src/lib/shell/sw.ts` runtime-caches the `/assets/pdfjs/` prefix.
+ */
+const pdfjsRequire = createRequire(import.meta.url);
+const PDFJS_ROOT = dirname(pdfjsRequire.resolve('pdfjs-dist/package.json'));
+const { version: PDFJS_VERSION } = JSON.parse(
+  readFileSync(join(PDFJS_ROOT, 'package.json'), 'utf8'),
+) as { version: string };
+const PDFJS_ASSET_DIR = `assets/pdfjs/${PDFJS_VERSION}`;
+
+/** The three binaries `pdf.worker.mjs` actually fetches, by hardcoded name. */
+const PDFJS_WASM_FILES = new Set(['jbig2.wasm', 'openjpeg.wasm', 'qcms_bg.wasm']);
+
+/**
+ * What ships out of each directory — and what deliberately doesn't.
+ *
+ * `wasm/` is filtered down to those three. `quickjs-eval.*` (475 KB) is the
+ * AcroForm scripting sandbox, dead unless `enableScripting` is set. The
+ * `*_nowasm_fallback.js` pair (596 KB) is left out on a narrower argument than
+ * "WebAssembly is unavailable, and in an app whose every codec is wasm it never
+ * is" — that reading is wrong, and the code says so: `WasmImage
+ * #instantiateWasm` catches *any* failure, a failed fetch included, and imports
+ * the fallback from there. So the real exposure is a wasm file that cannot be
+ * reached: an installed PWA taken offline before it ever fetched `openjpeg.wasm`
+ * (it is runtime-cached, not precached) then opened on a JPEG 2000 scan, whose
+ * images pdf.js would drop under `ignoreErrors`. That is one image class, in one
+ * offline order, against 596 KB on a prefix pinned `immutable` for a year — so
+ * the file stays out, and this paragraph is the note for whoever weighs it
+ * again. The `LICENSE*` files travel with the binaries: the BSD terms ask for
+ * the notice to accompany the binary, and 25 KB makes that literally true of the
+ * deployed app rather than only of the repository.
+ *
+ * `standard_fonts/` (800 KB) is left out entirely. It substitutes the 14
+ * standard PDF fonts when a document doesn't embed them, but `useSystemFonts`
+ * already covers that in a browser — and both sides of the reveal render
+ * through the same pdf.js, so any substitution is identical left and right and
+ * cancels out of a comparison about image quality. CMaps are not the same
+ * case: without one, text in a predefined CJK encoding doesn't substitute, it
+ * disappears, and a blank page reads as a broken preview.
+ */
+const PDFJS_ASSET_SOURCES: ReadonlyArray<readonly [dir: string, keep: (file: string) => boolean]> =
+  [
+    ['cmaps', (file) => file.endsWith('.bcmap') || file.startsWith('LICENSE')],
+    ['iccs', (file) => file.endsWith('.icc') || file.startsWith('LICENSE')],
+    ['wasm', (file) => PDFJS_WASM_FILES.has(file) || file.startsWith('LICENSE')],
+  ];
+
+/**
+ * `.bcmap` has no registered media type, so static hosts answer it with
+ * `application/octet-stream` (the unknown-extension default). Dev says the same
+ * thing rather than something friendlier, so that the admission guard in
+ * `sw.ts` sees one content type per extension across dev, preview and prod.
+ */
+const PDFJS_CONTENT_TYPES: Record<string, string> = {
+  '.wasm': 'application/wasm',
+  '.icc': 'application/vnd.iccprofile',
+  '.bcmap': 'application/octet-stream',
+};
+
+/** `[public path below `PDFJS_ASSET_DIR`, absolute source path]`. */
+function pdfjsAssetFiles(): Array<readonly [string, string]> {
+  return PDFJS_ASSET_SOURCES.flatMap(([dir, keep]) =>
+    readdirSync(join(PDFJS_ROOT, dir))
+      .filter(keep)
+      .map((file) => [`${dir}/${file}`, join(PDFJS_ROOT, dir, file)] as const),
+  );
+}
+
+function pdfjsAssets(): Plugin {
+  const files = pdfjsAssetFiles();
+  return {
+    name: 'pdfjs-assets',
+    // Copied out of node_modules at build time rather than checked into
+    // `public/`: that would be 2 MB of vendored binaries a human would then be
+    // expected to re-vendor by hand on every upgrade, and `public/` is swept by
+    // the precache globs besides.
+    //
+    // `writeBundle` and a plain copy, not `this.emitFile` — emitting them as
+    // rollup assets works, but it also prints 180 lines of `.bcmap` into the
+    // build report and buries the chunk sizes anyone actually reads. This hook
+    // runs after the output directory has been emptied and before
+    // vite-plugin-pwa builds the service worker in `closeBundle`, which is the
+    // window the files have to exist in.
+    writeBundle(options) {
+      if (options.dir === undefined) return;
+      for (const [url, source] of files) {
+        const target = join(options.dir, PDFJS_ASSET_DIR, url);
+        mkdirSync(dirname(target), { recursive: true });
+        copyFileSync(source, target);
+      }
+    },
+    // `dist/` doesn't exist in dev, so serve the same URLs straight out of
+    // node_modules — otherwise the PDF preview only works in a build. The path
+    // comes from the table above and never from the request, so there is no
+    // traversal to defend against.
+    configureServer(server) {
+      // Keyed on the public path, and the extension is read off that rather
+      // than off the source path — an absolute path can pick up a dot from any
+      // directory above node_modules, `cmaps/iccs/wasm` cannot.
+      const byUrl = new Map(
+        files.map(([url, source]) => {
+          const dot = url.lastIndexOf('.');
+          const type = dot === -1 ? undefined : PDFJS_CONTENT_TYPES[url.slice(dot)];
+          const entry = { source, type: type ?? 'text/plain; charset=utf-8' };
+          return [`/${PDFJS_ASSET_DIR}/${url}`, entry];
+        }),
+      );
+      server.middlewares.use((req, res, next) => {
+        const path = req.url?.split('?')[0];
+        const file = path === undefined ? undefined : byUrl.get(path);
+        if (file === undefined) {
+          next();
+          return;
+        }
+        res.setHeader('Content-Type', file.type);
+        res.end(readFileSync(file.source));
       });
     },
   };
@@ -83,6 +230,7 @@ export default defineConfig({
   plugins: [
     svelte(),
     crossOriginIsolation(),
+    pdfjsAssets(),
     VitePWA({
       // Custom `fetch` handler needed for the share-target POST intercept
       // (src/lib/shell/sw.ts) — `generateSW`'s declarative config can't
@@ -104,6 +252,19 @@ export default defineConfig({
         // it in the wasm tier on first HEIC decode instead.
         globIgnores: [
           '**/heic-decode-*.js',
+          // pdf.js, same policy: a ~2 MB worker script plus a ~430 KB library
+          // chunk, neither of which sits under the 5 MB cap for any better
+          // reason than that it happens to. Both are dead weight for every
+          // visitor who never opens a PDF, and `sw.ts` runtime-caches both.
+          //
+          // `pdf-????????.js` and not `pdf-*.js` deliberately: the loose form
+          // would also swallow a future `pdf-job-<hash>.js`, and the two
+          // failure directions are not symmetric. An app chunk quietly leaving
+          // the precache breaks offline first use; a build whose hashes stop
+          // being eight characters merely puts pdf.js back in the precache,
+          // which costs bandwidth and nothing else.
+          '**/pdf.worker*',
+          '**/pdf-????????.js',
           // Tauri-only chunks: reachable solely behind the isTauri() dynamic
           // import, dead weight for every web visitor's precache.
           '**/tauri-*.js',
@@ -181,6 +342,17 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
+  // The jSquash wrappers import their `.wasm` directly, which esbuild's
+  // dep-prebundler can't represent, so they have to stay out of it.
+  //
+  // `pdfjs-dist` deliberately is NOT in this list, having been checked rather
+  // than assumed: esbuild prebundles it cleanly (a 759 KB dep, `version` and
+  // `getDocument` intact), because it imports no wasm at all — every binary it
+  // needs it fetches by URL from inside the worker. The worker script and the
+  // data files never go through the prebundler either: one is a `?url` asset
+  // and the others are served by `pdfjsAssets` above. Excluding it would only
+  // cost a waterfall of ~200 unbundled ESM requests on the first PDF opened in
+  // a cold dev server.
   optimizeDeps: {
     exclude: [
       '@jsquash/avif',

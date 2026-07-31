@@ -9,6 +9,12 @@
    * before the first byte is decoded — `plan.ts` is pure, so dragging the quality
    * slider or switching the DPI target repaints the whole plan column for free.
    *
+   * Once a run lands there is a full-page before/after as well: page N of the
+   * original rasterised against page N of the rewrite, under the editor's own
+   * reveal divider. The table says which streams changed; only pixels can say
+   * whether the change is *visible*, and a document is judged a page at a time.
+   * The table stays — it answers the other question, and answers it earlier.
+   *
    * Two things this view refuses to fake:
    *  - A refused document (encrypted, signed, unreadable) never reaches the
    *    compressor. `compressPdf` would hand back the original with no reason
@@ -20,8 +26,9 @@
    * The job is bound to the `file` this view mounted with — mount one per file
    * (`{#key file}` upstream) rather than swapping the prop.
    */
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
 
+  import { RevealCompare } from '../compare';
   import {
     DEFAULT_PDF_SETTINGS,
     PDF_DPI_PRESETS,
@@ -97,6 +104,81 @@
    * `done`, and the SSIM column belongs to the run that produced the numbers.
    */
   const measured = $derived([...outcomes.values()].some((outcome) => outcome.ssim !== undefined));
+
+  /* ------------------------------------------------------------------ */
+  /* Page preview                                                        */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * The rasterised pair belongs to `PdfJob`, not to this file: a render is
+   * async, abortable, cached and outlives a keystroke, exactly like the analysis
+   * and the run. This view stays a pure reader of it, and of the page number.
+   */
+  const pageCount = $derived(job.pageCount);
+
+  /** 1-based, as printed on the page itself — same convention as `formatPages`. */
+  const pageNumber = $derived(job.previewPage + 1);
+
+  /**
+   * `RevealCompare` resets and refits the shared transform when `sourceKey`
+   * changes, and merely re-centres when the pixels change underneath an
+   * unchanged one. Folding the page in is not optional. With the file alone,
+   * turning the page would keep a transform fitted to a *different* sheet — and
+   * on a page of another size it would take the rotate/crop re-centre branch,
+   * which is the wrong gesture entirely. Fold the run in as well and every
+   * recompress would yank a zoomed-in reader back to fit. The page is the unit
+   * that must refit; the file is fixed for this view's whole life anyway
+   * (`{#key file}` upstream), so it is in the key for readability, not safety.
+   *
+   * The page is read off `preview`, **not** off `previewPage`, and the two are
+   * not the same page. `showPage()` moves the number synchronously and leaves
+   * the previous pair on screen for the whole render, so on a cache miss the key
+   * would otherwise change a flush *ahead* of the pixels: the refit would run
+   * against the page being left, and the incoming one — arriving under a key
+   * that no longer changes — would land in the re-centre branch. A mixed
+   * orientation document showed that as a portrait page cropped top and bottom
+   * at the landscape page's fit scale. Keyed on the pixels' own index, key and
+   * content always change in the same flush.
+   */
+  const previewKey = $derived(`${file.name}#${job.preview?.pageIndex ?? job.previewPage}`);
+
+  /**
+   * The output card's sub-line. Reads off the finished run, never off the rail —
+   * the rail stays live in `done`, and these pixels belong to the run that
+   * produced them. A document with nothing to recompress would otherwise
+   * announce "0 of 0 images replaced" over a page that did change.
+   */
+  const previewOutputMeta = $derived.by(() => {
+    const done = result;
+    if (!done) return '';
+    if (images.length === 0) return 'Metadata only';
+    return `${done.replaced} of ${images.length} images replaced`;
+  });
+
+  /** A failed rasterise must not read as a blank page — the bed says which it is. */
+  const previewPlaceholder = $derived.by(() => {
+    if (job.previewError) return 'Page could not be rendered';
+    if (job.previewLoading) return `Rendering page ${pageNumber}…`;
+    return 'No page rendered';
+  });
+
+  /** The job clamps; the buttons are disabled at the ends so it never has to. */
+  function turnPage(delta: number): void {
+    void job.showPage(job.previewPage + delta);
+  }
+
+  /**
+   * A run produces bytes, not pixels — `PdfJob` deliberately never rasterises on
+   * its own — so the first page of a finished comparison has to be asked for.
+   *
+   * The dependency is `canPreview` and nothing else. Everything the render
+   * itself writes (`previewPage`, `preview`, the loading flag) is untracked or
+   * unread, because asking for a page must not be what makes us ask again.
+   */
+  $effect(() => {
+    if (!job.canPreview) return;
+    void job.showPage(untrack(() => job.previewPage));
+  });
 
   /* ------------------------------------------------------------------ */
   /* Settings rail                                                       */
@@ -336,6 +418,62 @@
           </div>
         </div>
       </div>
+    {/if}
+
+    <!-- ------------------------------------------------------- preview -->
+    <!-- `canPreview` is the gate — a comparison needs both documents. `result`
+         is named again only so the byte read-outs below narrow. -->
+    {#if job.canPreview && result}
+      {@const done = result}
+      <section class="pdf-preview" aria-label="Page preview">
+        {#if job.previewError}
+          <p class="banner" role="alert">{job.previewError}</p>
+        {/if}
+
+        <!-- Nothing but the bed lives in here; see the note on `.preview-stage`. -->
+        <div class="preview-stage">
+          <RevealCompare
+            original={job.preview?.original.data}
+            output={job.preview?.output.data}
+            sourceKey={previewKey}
+            originalSize={formatBytes(done.srcBytes)}
+            originalMeta="Page {pageNumber} of {pageCount}"
+            outputLabel="Compressed"
+            outputSize={formatBytes(done.outBytes)}
+            outputDelta={formatSavings(done.srcBytes, done.outBytes)}
+            outputDeltaTone={done.outBytes > done.srcBytes ? 'red' : 'yellow'}
+            outputMeta={previewOutputMeta}
+            placeholder={previewPlaceholder}
+          />
+        </div>
+
+        <div class="pager">
+          <PillButton
+            variant="outline"
+            size={38}
+            disabled={job.previewPage <= 0}
+            ariaLabel="Previous page"
+            onclick={() => turnPage(-1)}
+          >
+            ←
+          </PillButton>
+          <span class="pager-count mono">{pageNumber} of {pageCount}</span>
+          <PillButton
+            variant="outline"
+            size={38}
+            disabled={job.previewPage >= pageCount - 1}
+            ariaLabel="Next page"
+            onclick={() => turnPage(1)}
+          >
+            →
+          </PillButton>
+          <!-- The bed's placeholder only shows while it is bare; once a page is
+               up, a re-render is silent without this. -->
+          {#if job.previewLoading}
+            <Chip tone="blue" size="xs">Rendering</Chip>
+          {/if}
+        </div>
+      </section>
     {/if}
 
     <!-- --------------------------------------------------------- table -->
@@ -667,12 +805,58 @@
     border-top: var(--border-faint);
   }
 
+  /* ------------------------------------------------------------ preview */
+
+  .pdf-preview {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    border-bottom: var(--border-hairline);
+    background: var(--surface);
+  }
+
+  /**
+   * `RevealCompare` is `width/height: 100%` and brings its own `--image-bed`
+   * background, so it needs a parent with a definite box and nothing else in it.
+   * Clamped rather than `flex: 1`: the table below is the only other elastic
+   * child, and it answers a question the bed cannot — it must not be squeezed
+   * out so the bed can have a few more pixels.
+   */
+  .preview-stage {
+    position: relative;
+    flex: none;
+    height: clamp(240px, 38vh, 460px);
+    min-width: 0;
+    border-bottom: var(--border-hairline);
+  }
+
+  .pager {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-6);
+  }
+
+  .pager-count {
+    font-size: var(--fs-mono-md);
+    color: var(--muted);
+  }
+
   /* -------------------------------------------------------------- table */
 
   .table-wrap {
     flex: 1;
     min-height: 0;
     overflow: auto;
+  }
+
+  /**
+   * With the bed on screen the table is the only child left to absorb the
+   * shortfall, and it would go to zero on a short window. A floor keeps a few
+   * rows visible and lets `.app-main` scroll instead — which it is set up to do.
+   */
+  .pdf-preview ~ .table-wrap {
+    min-height: 180px;
   }
 
   .pdf-images {
@@ -882,6 +1066,14 @@
       grid-template-columns: 1fr;
       gap: var(--space-5);
       padding: var(--space-4) var(--space-5);
+    }
+
+    .preview-stage {
+      height: clamp(200px, 34vh, 320px);
+    }
+
+    .pager {
+      padding: var(--space-3) var(--space-5);
     }
 
     /* The document-level columns survive; the object-level detail does not. */

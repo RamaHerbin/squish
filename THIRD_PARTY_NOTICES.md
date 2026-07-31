@@ -131,6 +131,91 @@ via `@jsquash/resize`'s public API.
 - **What it is:** small IndexedDB wrapper used for local persistence
   (presets, settings).
 
+### pdfjs-dist (pdf.js)
+
+- **npm package:** `pdfjs-dist@6.2.108`
+- **License:** Apache License 2.0 — the package's `package.json` `license`
+  field, with the full text at `node_modules/pdfjs-dist/LICENSE`.
+- **Upstream:** <https://github.com/mozilla/pdf.js>
+- **What it is:** Mozilla's PDF renderer. Pinch uses it to rasterise a page of
+  the original and of the compressed PDF for the before/after reveal in the PDF
+  view (`src/lib/pdf/render.ts`). It renders only — the structural rewriting is
+  `@cantoo/pdf-lib`'s job, and pdf.js is never asked to write a PDF. The
+  library and its worker are used unmodified as published.
+
+pdf.js reaches for four data directories at runtime by URL rather than by
+import. `vite.config.ts` (`pdfjsAssets`) copies three of them to
+`/assets/pdfjs/<pdfjs-version>/` and deliberately leaves `standard_fonts/` out;
+each carries its own upstream license, reproduced below with the file it was
+verified against. The licenses ship next to the binaries in `dist/`, not only
+here, since the BSD terms ask for the notice to accompany the binary form.
+
+#### qcms (`wasm/qcms_bg.wasm`)
+
+- **License:** MIT — `Copyright (C) 2009-2024 Mozilla Corporation` and
+  `Copyright (C) 1998-2007 Marti Maria`. See
+  `node_modules/pdfjs-dist/wasm/LICENSE_QCMS`.
+- **Upstream:** <https://github.com/FirefoxGraphics/qcms> (Firefox's color
+  management engine, descended from Marti Maria's Little CMS).
+- **Binding license:** the wasm-bindgen glue Mozilla generates around it is
+  BSD 2-Clause, `Copyright (c) 2025, Mozilla Foundation` —
+  `node_modules/pdfjs-dist/wasm/LICENSE_PDFJS_QCMS`.
+- **What it does here:** applies embedded ICC profiles when a PDF's images or
+  color spaces carry one.
+
+#### jbig2 (`wasm/jbig2.wasm`)
+
+- **License:** BSD 3-Clause — `Copyright 2014 The PDFium Authors`, with the
+  "neither the name of Google Inc. nor the names of its contributors" clause.
+  See the first 27 lines of `node_modules/pdfjs-dist/wasm/LICENSE_JBIG2`; the
+  remainder of that same file is the Apache-2.0 text covering PDFium's own
+  later contributions.
+- **Upstream:** <https://pdfium.googlesource.com/pdfium> (the JBIG2 and CCITT
+  fax decoders, compiled to wasm by pdf.js).
+- **Binding license:** Apache License 2.0, `Copyright 2026 Mozilla Foundation`
+  — `node_modules/pdfjs-dist/wasm/LICENSE_PDFJS_JBIG2`.
+- **What it does here:** decodes JBIG2 and CCITT G3/G4 images, the two
+  compression schemes scanned black-and-white pages arrive in.
+
+#### openjpeg (`wasm/openjpeg.wasm`)
+
+- **License:** BSD 2-Clause — `Copyright (c) 2002-2014, Universite catholique
+  de Louvain (UCL), Belgium`, Professor Benoit Macq, Antonin Descampe,
+  Francois-Olivier Devaux, Herve Drolon (FreeImage Team), Yannick Verschueren,
+  David Janssens, CNES and CS Systemes d'Information. See
+  `node_modules/pdfjs-dist/wasm/LICENSE_OPENJPEG`.
+- **Patent notice required by that file:** "This software may be subject to
+  other third party and contributor rights, including patent rights, and no
+  such rights are granted under this license." JPEG 2000's core coding is long
+  out of patent, but the disclaimer is part of the license text and is
+  reproduced here because the license reproduces it.
+- **Upstream:** <https://github.com/uclouvain/openjpeg>
+- **Binding license:** BSD 2-Clause, `Copyright (c) 2024, Mozilla Foundation`
+  — `node_modules/pdfjs-dist/wasm/LICENSE_PDFJS_OPENJPEG`.
+- **What it does here:** decodes JPEG 2000 (`JPXDecode`) images, which is how
+  most print-origin and archival PDFs store photographs.
+
+#### Adobe CMap resources (`cmaps/*.bcmap`)
+
+- **License:** BSD 3-Clause — `Copyright 1990-2009 Adobe Systems Incorporated.
+  All rights reserved.` The text ships as `%%Copyright:`-prefixed PostScript
+  comments at `node_modules/pdfjs-dist/cmaps/LICENSE`, which is copied into
+  `dist/` alongside the maps.
+- **Upstream:** <https://github.com/adobe-type-tools/cmap-resources>
+- **What it does here:** the 168 predefined CJK character maps. Without the one
+  a document names, text in that encoding does not render at all, so a preview
+  of a Japanese or Chinese PDF would come back blank rather than merely
+  substituted.
+
+#### CGATS001Compat ICC profile (`iccs/CGATS001Compat-v2-micro.icc`)
+
+- **License:** CC0 1.0 Universal (public domain dedication) — full text at
+  `node_modules/pdfjs-dist/iccs/LICENSE`.
+- **Upstream:** shipped by pdf.js as the default CMYK profile
+  (<https://github.com/mozilla/pdf.js>, `external/iccs`).
+- **What it does here:** the fallback profile for `DeviceN`/CMYK color spaces
+  that name no profile of their own.
+
 ---
 
 ## HEIC/HEIF decoding (LGPL-3.0 component)
@@ -232,6 +317,12 @@ bundle:
 - `caniuse-lite` — **CC-BY-4.0** (browser support data, not code), pulled in
   transitively for build tooling. Attribution: caniuse.com / Can I Use
   project. Not present in the shipped bundle.
+- `@napi-rs/canvas` — **MIT**, `@napi-rs/canvas@1.0.3`. An *optional*
+  dependency of `pdfjs-dist`, so npm installs it (26 MB of prebuilt native
+  binaries) even though nothing here can reach it: it is how pdf.js gets a
+  canvas under Node, and `pdfjs-dist`'s `package.json` `browser` field maps
+  `canvas` to `false` for every bundler. Listed because its size makes an
+  auditor look twice, not because it ships.
 
 Every other package resolved to `MIT`, `Apache-2.0`, `ISC`, `BSD-2-Clause`,
 `BSD-3-Clause`, `BlueOak-1.0.0`, `MIT-0`, `CC0-1.0`, or `OFL-1.1` — all
