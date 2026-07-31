@@ -13,6 +13,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with a live plan preview, quality/DPI controls, optional SSIM, dedupe and metadata
   stripping. 150 MB PDF limit (3× the image limit), native Open With on macOS, demo sample
   on the home screen.
+- **PDF** — See the pages, not just the numbers. A full-page before/after preview sits under
+  the same reveal divider as the image editor: the original page and the compressed one,
+  rasterised at the same scale, with shared pan/zoom and paging through the document.
+  Drawing a page needs a rasteriser — `@cantoo/pdf-lib` rewrites a PDF but cannot render one
+  — so pdf.js now ships with the app, fetched only once a PDF is actually open.
 
 **Platform**
 
