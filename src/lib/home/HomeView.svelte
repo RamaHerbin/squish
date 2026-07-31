@@ -20,6 +20,7 @@
     EXTENSION_BY_MIME,
     FILE_PICKER_ACCEPT,
     PDF_FILE_PICKER_ACCEPT,
+    PDF_MIME_TYPE,
     mimeTypeFromFilename,
     type ImageMimeType,
   } from '$lib/contracts';
@@ -263,6 +264,7 @@
   }
 
   function extensionFor(mimeType: string): string {
+    if (mimeType === PDF_MIME_TYPE) return 'pdf';
     return EXTENSION_BY_MIME[mimeType as ImageMimeType] ?? 'png';
   }
 
@@ -278,17 +280,28 @@
       const files: File[] = [];
       let index = 0;
       for (const item of items) {
-        const imageType = item.types.find((type) => type.startsWith('image/'));
-        if (!imageType) continue;
-        const blob = await item.getType(imageType);
+        // PDF is asked for, and today no browser will hand one over: the async
+        // clipboard API carries a sanitised allowlist, and
+        // `ClipboardItem.supports('application/pdf')` is false in Chrome. The
+        // branch is here because it costs nothing and starts working the day
+        // that changes; the notice below is what actually helps now, because a
+        // real Cmd+V *does* work — `onWindowPaste` reads `clipboardData.files`,
+        // which is a different, unsanitised path. Images stay first so a copy
+        // carrying both keeps its old behaviour rather than opening the PDF
+        // screen unasked.
+        const type =
+          item.types.find((candidate) => candidate.startsWith('image/')) ??
+          item.types.find((candidate) => candidate === PDF_MIME_TYPE);
+        if (!type) continue;
+        const blob = await item.getType(type);
         index += 1;
-        files.push(new File([blob], `pasted-${index}.${extensionFor(imageType)}`, { type: imageType }));
+        files.push(new File([blob], `pasted-${index}.${extensionFor(type)}`, { type }));
       }
       if (files.length > 0) {
         notice = undefined;
         onfiles(files);
       } else {
-        notice = 'Clipboard has no image.';
+        notice = 'Clipboard has no image. For a PDF, press ⌘V / Ctrl+V.';
       }
     } catch {
       notice = 'Clipboard access blocked — press ⌘V instead.';
