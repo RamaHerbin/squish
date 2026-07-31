@@ -83,11 +83,14 @@ Pinch compresses images.
 - **Saving.** The web app downloads through the browser's own download UI. The macOS app
   opens a native save panel, and you choose the exact destination and filename yourself;
   nothing lands in a default Downloads folder unless you point it there.
-- **File associations.** Finder can open image files with Pinch directly ("Open With
-  Pinch", drag-and-drop onto the Dock icon, or a second `open -a Pinch photo.png` from the
+- **File associations.** Finder can open files with Pinch directly ("Open With Pinch",
+  drag-and-drop onto the Dock icon, or a second `open -a Pinch photo.png` from the
   command line), and Pinch registers itself as a viewer for the common formats it reads.
-  It does not claim to be your default image opener; that choice stays with Finder or with
-  whichever app you had before.
+  **PDFs are registered too**, as a separate association, and open on the PDF screen
+  rather than in the image editor — including from a cold launch, where the Rust side
+  buffers the path until the front end says it is ready. It does not claim to be your
+  default opener for anything; that choice stays with Finder or with whichever app you
+  had before.
 - **HEIC decoding.** iPhone photos already open in the web app for anyone on Safari,
   because Safari decodes HEIC natively and only falls back to the bundled libheif
   WebAssembly decoder elsewhere. The macOS app uses that same native-decode-first path

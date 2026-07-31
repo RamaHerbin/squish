@@ -354,6 +354,10 @@
             <span class="spec-label">Batch</span>
             <Chip tone="green">Up to 5,000 files</Chip>
           </div>
+          <div class="spec-row">
+            <span class="spec-label">PDF</span>
+            <Chip tone="yellow">Recompress in place</Chip>
+          </div>
         </div>
       {/if}
     </div>
@@ -410,7 +414,7 @@
         </div>
 
         {#if !isCompact}
-          <div class="corner corner-left" aria-hidden="true">JPEG · PNG · WEBP · AVIF · HEIC · SVG · GIF</div>
+          <div class="corner corner-left" aria-hidden="true">JPEG · PNG · WEBP · AVIF · HEIC · SVG · GIF · PDF</div>
           <div class="corner corner-right" aria-hidden="true">MAX 50 MB / IMAGE · 150 MB / PDF</div>
         {/if}
       </div>

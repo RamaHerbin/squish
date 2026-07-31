@@ -31,6 +31,8 @@ to offer, with one exception noted below; it asks the platform.
 | SVG input and vector-quality resize | Verified | Expected | Expected | — (requires a document; not available in a worker) |
 | HDR detection and labelling | Verified | Expected | Expected | — (a byte scan, no platform API involved) |
 | SSIM metrics worker | Verified | Expected | Expected | — (plain arithmetic in a module worker) |
+| PDF compression (analyse, recompress, download) | Verified | Expected | Expected | — (pdf-lib plus the same codec worker; no platform API involved) |
+| PDF page before/after preview (pdf.js) | Verified | Expected | Expected on 16+ | The run still completes; the preview reports that it could not render |
 | Batch queue and ZIP export | Verified | Expected | Expected | — |
 | Folder drop (`webkitGetAsEntry` recursion) | Verified | Expected | Expected | Falls back to the flat `DataTransfer.files` list |
 | OPFS staging of batch results | Verified | Expected | Expected on recent versions | Results stay in memory; large batches use more RAM |
@@ -133,6 +135,21 @@ reports which mode it is in (`stageKind: 'opfs' | 'memory'`).
 - **File handlers** (`launchQueue`) are desktop-Chromium-only, and only for an installed
   app. The consumer is raced against a 300 ms timeout, because per spec it may never
   fire on a normal navigation.
+
+### The PDF preview and Safari
+
+Rasterising a page needs pdf.js, and pdf.js 6's default build calls
+`Promise.withResolvers`, which Safari only shipped in 17.4. Pinch therefore loads pdf.js
+from its `legacy/` build, which bundles the polyfills upstream considers necessary, so
+Safari 16 and 17.0-17.3 get a working preview rather than a module that throws on
+evaluation. The same choice covers the WKWebView in the macOS app, where
+`minimumSystemVersion` is 12.0.
+
+pdf.js renders in its own worker. If that worker cannot start, pdf.js does not throw — it
+silently falls back to rasterising on the main thread, which would freeze the tab on a
+real document. Pinch checks for that fallback and reports it instead, so a broken preview
+says so rather than hanging. Compression itself does not depend on any of this: the run
+completes and the file downloads even when the preview cannot draw.
 
 ### Storage
 

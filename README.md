@@ -5,7 +5,7 @@
 <h1 align="center">Pinch</h1>
 
 <p align="center">
-  Client-side image compression: pick a codec, see what it costs, download the result — nothing is uploaded.
+  Client-side image and PDF compression: pick a codec, see what it costs, download the result — nothing is uploaded.
 </p>
 
 <p align="center">
@@ -24,11 +24,15 @@
   <img src="./docs/media/editor.png" alt="The Pinch editor: the original and a MozJPEG encode under one draggable reveal divider, with size, savings and SSIM readouts" width="900">
 </p>
 
+<p align="center">
+  <img src="./docs/media/pdf.png" alt="The Pinch PDF screen: a two-page report analysed into a per-image table, with page 1 of the original and of the compressed document under the same reveal divider" width="900">
+</p>
+
 <p align="center"><strong>Try it: https://pinch.rama.app</strong></p>
 
 Pinch is a modern, privacy-first alternative to [Squoosh](https://github.com/GoogleChromeLabs/squoosh)
 — same idea, codecs compiled to WebAssembly running in your browser, rebuilt on a
-current stack, with the batch, metrics and comparison features Squoosh doesn't have.
+current stack, with the batch, metrics, comparison and PDF features Squoosh doesn't have.
 
 Every codec runs locally. There is no server, no upload, no account, no analytics, and
 the app works with the network switched off once it has been loaded.
@@ -75,6 +79,12 @@ the app works with the network switched off once it has been loaded.
 - **Presets** — four built-ins plus your own, stored in IndexedDB, exportable as JSON,
   and shareable as a URL (`?p=…`: settings JSON, deflated, base64url-encoded, then
   strictly re-validated on the way in because a shared link is untrusted input).
+- **PDF compression** — drop a PDF and Pinch recompresses the raster images embedded in
+  it, in place. Text, vectors, fonts and the page count are untouched; every embedded
+  image gets a row saying what will happen to it and why, before a byte is decoded. A
+  full-page before/after sits under the same reveal divider as the editor, rasterised
+  with [pdf.js](https://github.com/mozilla/pdf.js). Encrypted and digitally signed
+  documents are refused rather than quietly broken.
 - **PWA** — installable, offline-capable, an OS share target and a registered file
   handler, with an explicit "Reload" prompt when a new version is waiting.
 
@@ -92,6 +102,7 @@ Pinch does not.
 | Auto-suggest quality | Yes — binary search to an SSIM target | No |
 | Codec matrix sweep | Yes — 5 encoders × 4 steps in one table | No |
 | HEIC/HEIF input | Yes (libheif) | No |
+| PDF compression | Yes — recompresses embedded images, with a page before/after | No |
 | HDR detection | Yes — PQ, HLG, gain map; labelled, tone-mapped to SDR | No |
 | Multi-file tabs | Yes | No |
 | Shareable presets | Yes — saved presets, JSON export, `?p=` links | No (settings live in the URL hash, not as named presets) |
@@ -132,7 +143,7 @@ it is just slower. Deploying your own instance: see [docs/deploy.md](./docs/depl
 
 Pinch also ships as a native macOS app: the same web build, running in a Tauri 2 window
 instead of a browser tab, with a native save dialog and Finder file associations for
-opening images directly. Grab the `.dmg` from the
+opening images and PDFs directly. Grab the `.dmg` from the
 [Releases page](https://github.com/RamaHerbin/squish/releases), or build it yourself with
 `npm run tauri:build`. See [docs/macos.md](./docs/macos.md) for the full walkthrough,
 including what to do about the unsigned-app warning on first launch.
@@ -147,8 +158,10 @@ Five layers, each of which only depends on the ones above it:
   chain and runtime capability probes.
 - `src/lib/state/` — the job engine: work diffing, the four-step pipeline, hierarchical
   aborts and a five-entry result cache.
-- `src/lib/{metrics,matrix,batch,presets,edit,compare,options,settings}/` — features,
+- `src/lib/{metrics,matrix,batch,presets,edit,compare,options,settings,pdf}/` — features,
   each self-contained and each injected with what it needs rather than importing across.
+  `pdf/` is the odd one out: it never decodes a whole document, it opens a PDF, swaps the
+  image streams inside it and writes it back.
 - `src/App.svelte` — the composition root: router, tab strip, start-up handshake and
   the dependency injection that keeps state and codecs from importing each other.
 
@@ -179,8 +192,13 @@ Feature-by-feature matrix, and what was actually tested versus inferred:
 - **SSIM, not butteraugli.** Single-scale SSIM on the luma plane — cheap enough to run
   on every slider commit and on 20 matrix cells. See the
   [FAQ](./docs/FAQ.md#why-ssim-and-not-butteraugli).
-- **50 MB per file, 5000 files per drop.** Oversized files are named in the message that
-  follows the drop; the file-count cap simply stops collecting.
+- **50 MB per image, 150 MB per PDF, 5000 files per drop.** Oversized files are named in
+  the message that follows the drop; the file-count cap simply stops collecting.
+- **A PDF only shrinks where it holds photographs.** Recompression rewrites embedded
+  `DCTDecode` and `FlateDecode` images and nothing else, so a text-and-vector document
+  has almost nothing to win. JPEG 2000, JBIG2, CCITT, CMYK and non-8-bit images are
+  reported and skipped rather than guessed at, and transparency in an embedded image is
+  flattened because baseline JPEG carries no alpha.
 - **English only.** No i18n layer.
 
 ## Contributing
@@ -197,4 +215,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the details, and
 MIT © 2026 Rama Herbin. See [LICENSE](./LICENSE).
 
 Codecs are third-party: the `@jsquash/*` builds are Apache-2.0, and HEIC decoding uses
-`libheif-js` (LGPL-3.0), loaded as a separate dynamically-imported chunk.
+`libheif-js` (LGPL-3.0), loaded as a separate dynamically-imported chunk. The PDF side
+uses `@cantoo/pdf-lib` (MIT) to rewrite documents and `pdfjs-dist` (Apache-2.0) to
+rasterise a page for the preview. Full attributions, including the wasm decoders pdf.js
+bundles, are in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).

@@ -284,7 +284,7 @@ export default defineConfig({
         name: 'Pinch',
         short_name: 'Pinch',
         description:
-          'Client-side image compression: AVIF, JPEG XL, WebP and more. Compare, batch, share presets. Nothing leaves your device.',
+          'Client-side image and PDF compression: AVIF, JPEG XL, WebP and more. Compare, batch, share presets. Nothing leaves your device.',
         lang: 'en',
         start_url: '/',
         id: '/',
