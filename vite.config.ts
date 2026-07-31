@@ -321,7 +321,13 @@ export default defineConfig({
           method: 'POST',
           enctype: 'multipart/form-data',
           params: {
-            files: [{ name: 'image', accept: ['image/*'] }],
+            // PDFs are shareable too — `routePdfs()` in App.svelte already sends a
+            // shared file to the PDF screen, and the service worker's intercept
+            // stores whatever `File` arrives without looking at its type, so
+            // `image/*` alone was the only thing turning the share sheet away.
+            // The extension is listed beside the MIME because Android share
+            // intents are not required to carry one.
+            files: [{ name: 'image', accept: ['image/*', 'application/pdf', '.pdf'] }],
           },
         },
         // OS "Open with Pinch" — consumed via window.launchQueue in share-target.ts.
