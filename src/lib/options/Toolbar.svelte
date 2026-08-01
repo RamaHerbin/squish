@@ -12,7 +12,7 @@
    * The editor's single 108px toolbar (comp 02 / 02b). One row, six cells
    * divided by hairlines, a 1.5px ink rule along the top:
    *
-   *   Source │ Encoder │ Quality │ Toggles │ Metrics │ Result + Download
+   *   Source │ Encoder │ Quality │ Toggles │ Metrics │ Result + actions
    *
    * Everything is derived from the one `SideSettings` the editor owns — this
    * component holds no settings state of its own. The `Advanced ›` link and
@@ -48,6 +48,7 @@
     metricsNote,
     onDownload,
     downloadDisabled = false,
+    onShare,
     advancedOpen,
     onAdvancedToggle,
     shortcut = true,
@@ -68,16 +69,25 @@
     onchange(withEncoder(settings, id) as SideSettings);
   }
 
-  /* ⌘S / Ctrl+S — the shortcut the download pill advertises. */
+  /* ⌘S / Ctrl+S and ⇧⌘S — the shortcuts the two pills advertise. */
   $effect(() => {
-    if (!shortcut || !onDownload) return;
+    if (!shortcut || (!onDownload && !onShare)) return;
 
     function handleKeydown(event: KeyboardEvent): void {
       if (event.key !== 's' && event.key !== 'S') return;
       if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
       if (downloadDisabled || encoding) return;
+      // Shift routes to the share sheet; without it, the download. Each is
+      // inert while its pill is absent, so the hint never lies.
+      if (event.shiftKey) {
+        if (!onShare) return;
+        event.preventDefault();
+        onShare();
+        return;
+      }
+      if (!onDownload) return;
       event.preventDefault();
-      onDownload?.();
+      onDownload();
     }
 
     window.addEventListener('keydown', handleKeydown);
@@ -174,7 +184,7 @@
     {/if}
   </div>
 
-  <!-- Result + download --------------------------------------------------- -->
+  <!-- Result + actions ---------------------------------------------------- -->
   <div class="cell cell--result">
     <div class="figures">
       {#if error}
@@ -188,6 +198,18 @@
         <span class="figure-note mono">{formatDelta(originalBytes, outputBytes)}</span>
       {/if}
     </div>
+
+    {#if onShare}
+      <button
+        type="button"
+        class="share"
+        disabled={!canDownload}
+        onclick={() => onShare?.()}
+      >
+        <span class="share-label">Share</span>
+        <span class="share-hint">⇧⌘S</span>
+      </button>
+    {/if}
 
     <button
       type="button"
@@ -378,30 +400,50 @@
     white-space: normal;
   }
 
-  .download {
+  .download,
+  .share {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     flex: none;
     gap: 5px;
+    border-radius: var(--radius-pill);
+  }
+
+  .download {
     inline-size: 168px;
     margin: 16px 18px 16px 0;
     border: 0;
-    border-radius: var(--radius-pill);
     background: var(--ink);
     color: var(--cream);
+  }
+
+  /* Outline sibling: the share sheet is the alternative to a download, not the
+     louder version of one. Narrower, because "Share" is the shorter word. */
+  .share {
+    inline-size: 116px;
+    margin: 16px 10px 16px 0;
+    border: var(--border-ink);
+    background: var(--paper);
+    color: var(--ink);
   }
 
   .download:hover:not(:disabled) {
     background: color-mix(in srgb, var(--ink) 86%, var(--paper));
   }
 
-  .download:disabled {
+  .share:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--ink) 8%, var(--paper));
+  }
+
+  .download:disabled,
+  .share:disabled {
     opacity: 0.42;
   }
 
-  .download-label {
+  .download-label,
+  .share-label {
     font-family: var(--font-mono);
     font-size: var(--fs-xs);
     font-weight: 700;
@@ -409,11 +451,19 @@
     text-transform: uppercase;
   }
 
-  .download-hint {
+  .download-hint,
+  .share-hint {
     font-family: var(--font-mono);
     font-size: var(--fs-mono-sm);
     letter-spacing: var(--tracking-mono-wide);
+  }
+
+  .download-hint {
     color: var(--cream-muted);
+  }
+
+  .share-hint {
+    color: var(--muted);
   }
 
   /* --- Narrow desktop: wrap instead of crushing the cells ---------------- */

@@ -37,6 +37,7 @@ to offer, with one exception noted below; it asks the platform.
 | Folder drop (`webkitGetAsEntry` recursion) | Verified | Expected | Expected | Falls back to the flat `DataTransfer.files` list |
 | OPFS staging of batch results | Verified | Expected | Expected on recent versions | Results stay in memory; large batches use more RAM |
 | Offline / installable PWA | Verified | Partial: service worker yes, install prompt no | Partial: "Add to Home Screen", no `beforeinstallprompt` | The app still runs; it is just not installable that way |
+| Share sheet ("Share from Pinch", files) | Expected where the platform has one | No | Expected (macOS and iOS) | The Share button is not rendered; Download is unchanged |
 | Share target ("Share to Pinch") | Android / ChromeOS only | No | No | The manifest entry is simply never used |
 | File handlers ("Open with Pinch") | Desktop Chromium (installed app) | No | No | Files open the normal way |
 | IndexedDB (presets, settings) | Verified | Expected | Expected; unavailable in some private modes | Falls back to in-memory defaults for the session |
@@ -135,6 +136,34 @@ reports which mode it is in (`stageKind: 'opfs' | 'memory'`).
 - **File handlers** (`launchQueue`) are desktop-Chromium-only, and only for an installed
   app. The consumer is raced against a 300 ms timeout, because per spec it may never
   fire on a normal navigation.
+- **Share sheet** (outbound: `navigator.share({ files })`) is the reverse direction, and
+  it is what puts a compressed file into AirDrop, Mail or Messages on macOS and iOS. See
+  below.
+
+### The Share button appears only where it will work
+
+`canShareFiles()` (`src/lib/platform/index.ts`) is asked before the button is rendered at
+all — there is no disabled state, because a greyed-out Share advertises something the
+browser will never do. It is false in four situations:
+
+- **Firefox**, which implements no part of Web Share Level 2.
+- **A type the user agent will not carry.** The browser keeps an allowlist; JPEG XL is on
+  nobody's, and AVIF is on some. So flipping the editor's encoder can legitimately make
+  the button come and go — it is answering honestly each time.
+- **A batch that is too large.** The queue shares its finished outputs as individual
+  files rather than the zip, and the browser caps how many it will take. Over the cap the
+  button disappears and `Download .zip` is still there.
+- **The macOS app.** No share plugin is installed under Tauri, and only `dialog:allow-save`,
+  `fs:allow-write-file` and `opener:allow-open-url` are granted. A Share button that
+  quietly re-opened the save panel would lie, so there is none. A native
+  `NSSharingServicePicker` command would be the way to add one.
+
+Two constraints shape the code. The API needs a **secure context**, so a phone testing
+over a LAN IP on plain http gets nothing — use the deployed site or an https tunnel. And
+it needs **transient activation**: `shareFiles()` awaits nothing before calling
+`navigator.share`, and neither may its callers, or Safari rejects a share whose gesture
+has already been spent. That is why the queue never builds a zip for sharing: the build
+is async, and the gesture would be gone by the time the sheet was asked for.
 
 ### The PDF preview and Safari
 

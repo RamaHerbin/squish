@@ -70,7 +70,7 @@
   import { AutoSuggestController, getSharedMetricsClient } from './metrics';
   import { createEditState } from './edit/edit.svelte';
   import { rotate as rotateImage } from './edit/transform';
-  import { messageOf, saveBlob } from './platform';
+  import { canShareFiles, messageOf, saveBlob, shareFiles } from './platform';
   import { appSettings } from './settings/settings.svelte';
 
   /** How long the pixels have to sit still before SSIM is worth paying for. */
@@ -452,7 +452,7 @@
   }
 
   /* ------------------------------------------------------------------ */
-  /* Download                                                            */
+  /* Download and share                                                  */
   /* ------------------------------------------------------------------ */
 
   const downloadUrl = $derived(st.sides[1].downloadUrl);
@@ -464,16 +464,36 @@
    * `saveBlob` is the same throwaway-anchor download as before, and it runs
    * synchronously — no await before the click, so the gesture is preserved.
    */
-  let saveError = $state<string | undefined>(undefined);
+  let egressError = $state<string | undefined>(undefined);
 
   function download(): void {
     const file = st.sides[1].file;
     if (!file) return;
-    saveError = undefined;
+    egressError = undefined;
     // No await before the anchor click on the web path, so the user gesture is
     // preserved; the catch only ever fires on the native dialog/fs path.
     saveBlob(file.name, file).catch((error) => {
-      saveError = `Could not save: ${messageOf(error)}`;
+      egressError = `Could not save: ${messageOf(error)}`;
+    });
+  }
+
+  /**
+   * The encoded output is already a `File` with the right name and MIME type,
+   * so the browser is asked about the real thing rather than a stand-in. The
+   * answer moves with the encoder: JPEG XL is on no user agent's share
+   * allowlist, so the button disappears when the editor switches to it.
+   */
+  const outputFile = $derived(st.sides[1].file);
+  const shareable = $derived(outputFile !== undefined && canShareFiles([outputFile]));
+
+  function share(): void {
+    const file = st.sides[1].file;
+    if (!file) return;
+    egressError = undefined;
+    // Nothing awaited before `navigator.share`, or Safari has already spent the
+    // gesture by the time the sheet is asked for.
+    shareFiles([file]).catch((error) => {
+      egressError = `Could not share: ${messageOf(error)}`;
     });
   }
 
@@ -493,8 +513,8 @@
   {#if st.error}
     <p class="editor-error" role="alert">{st.error}</p>
   {/if}
-  {#if saveError}
-    <p class="editor-error" role="alert">{saveError}</p>
+  {#if egressError}
+    <p class="editor-error" role="alert">{egressError}</p>
   {/if}
 
   <div class="editor-stage">
@@ -546,6 +566,7 @@
     {metricsNote}
     onDownload={download}
     downloadDisabled={downloadUrl === undefined}
+    onShare={shareable ? share : undefined}
   />
 </div>
 

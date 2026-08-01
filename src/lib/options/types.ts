@@ -53,6 +53,16 @@ export interface EditorControlsData {
   onDownload?: () => void;
   /** Greys out the pill and disables the shortcut. */
   downloadDisabled?: boolean;
+
+  /**
+   * Opens the system share sheet — AirDrop, Mail, Messages.
+   *
+   * Absent means the platform cannot share this file, and no button is
+   * rendered at all: there is no disabled state, because a greyed-out Share
+   * would advertise something the browser will never do. The caller decides
+   * with `canShareFiles()` from `$lib/platform`.
+   */
+  onShare?: () => void;
 }
 
 export interface ToolbarProps extends EditorControlsData {
