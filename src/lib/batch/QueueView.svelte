@@ -137,7 +137,11 @@
       const next = waiting.shift();
       if (next) next();
     };
-    return async <T>(task: () => Promise<T>): Promise<T> => {
+    // A named function expression, not a generic arrow: `async <T>(task) => …`
+    // inside a `.svelte` script compiles to `async () => …` — the type
+    // parameter takes the argument list with it — and the body then throws
+    // `ReferenceError: task is not defined` on every call.
+    return async function limited<T>(task: () => Promise<T>): Promise<T> {
       if (active >= max) await new Promise<void>((resolve) => waiting.push(resolve));
       active++;
       try {

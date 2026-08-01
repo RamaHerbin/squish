@@ -76,6 +76,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The queue's **Dimensions** column was an em dash for every row. A generic arrow function
+  compiled to one taking no arguments at all, so the probe that reads a file's pixel size
+  threw on every call.
 - AVIF, JPEG XL and OxiPNG failed for long-returning visitors while WebP and MozJPEG kept
   working — the three that have threaded wasm builds. Their emscripten pthread scripts are
   content-hashed and served `immutable, max-age=1y`, so a browser that fetched them before
