@@ -234,6 +234,89 @@ function downloadViaAnchor(suggestedName: string, blob: Blob): SaveOutcome {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Sharing                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What happened to a share request.
+ *
+ * `'unsupported'` means nothing was shown to the user at all — the caller is
+ * expected to have hidden its button already, so this is the belt to
+ * {@link canShareFiles}'s braces rather than a state anyone renders.
+ * `'cancelled'` is the user dismissing the system sheet, which is not a
+ * failure.
+ */
+export type ShareOutcome = 'shared' | 'cancelled' | 'unsupported';
+
+/** Optional copy that rides along with the files. */
+export interface ShareText {
+  title?: string;
+  text?: string;
+}
+
+/**
+ * Whether this platform will put these exact files into a system share sheet.
+ *
+ * Synchronous and side-effect free, so it can be read from a `$derived` and
+ * used to decide whether a Share button exists at all. A button that opens
+ * nothing is worse than no button.
+ *
+ * The browser decides on the file *types* and the size of the batch, not on
+ * the bytes — so an empty `File` with the right name and type is a legitimate
+ * probe when materialising the real one would cost a copy of the whole output.
+ *
+ * Two ways this returns false that are worth knowing about:
+ *
+ * - **Firefox** implements no part of Web Share Level 2.
+ * - **The user-agent's type allowlist.** JPEG XL is on no browser's list and
+ *   AVIF is on some, so flipping the editor's encoder can legitimately make
+ *   the button come and go.
+ *
+ * Tauri returns false unconditionally: no share plugin is installed, and a
+ * Share button that quietly re-opened the save panel would lie about what it
+ * does.
+ */
+export function canShareFiles(files: readonly File[]): boolean {
+  if (isTauri()) return false;
+  if (typeof navigator === 'undefined') return false;
+  if (typeof navigator.share !== 'function') return false;
+  if (typeof navigator.canShare !== 'function') return false;
+  if (files.length === 0) return false;
+  try {
+    return navigator.canShare({ files: [...files] });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Hand files to the system share sheet — AirDrop, Mail, Messages, Notes.
+ *
+ * **Nothing may be awaited before calling this.** `navigator.share()` requires
+ * transient activation, which the same-task rule of {@link saveBlob} protects
+ * by accident and this one depends on outright: Safari rejects a share whose
+ * gesture has already been spent. Everything above the `navigator.share` call
+ * below is synchronous for that reason, so callers only have to keep their own
+ * side of the bargain — have the bytes in hand before the click.
+ *
+ * Rejects only on a real platform failure; a dismissed sheet resolves
+ * `'cancelled'`.
+ */
+export async function shareFiles(
+  files: readonly File[],
+  data?: ShareText,
+): Promise<ShareOutcome> {
+  if (!canShareFiles(files)) return 'unsupported';
+  try {
+    await navigator.share({ ...data, files: [...files] });
+    return 'shared';
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return 'cancelled';
+    throw error;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
 /* External links                                                              */
 /* -------------------------------------------------------------------------- */
 
