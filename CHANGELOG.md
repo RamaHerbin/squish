@@ -9,6 +9,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Share** — Send a compressed file straight to AirDrop, Mail, Messages or anywhere else
+  the system share sheet reaches, instead of downloading it and hunting for it afterwards.
+  In the editor (also ⇧⌘S), on the PDF screen, and in the queue, which shares its finished
+  images as files rather than as a zip. The button appears only where the browser will
+  actually carry the file, so it is absent in Firefox, for JPEG XL output, and in the macOS
+  app.
+
 - **PDF** — Drop a PDF to recompress its embedded images in place: per-image analysis table
   with a live plan preview, quality/DPI controls, optional SSIM, dedupe and metadata
   stripping. 150 MB PDF limit (3× the image limit), native Open With on macOS, demo sample
@@ -69,6 +76,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The queue's **Dimensions** column was an em dash for every row. A generic arrow function
+  compiled to one taking no arguments at all, so the probe that reads a file's pixel size
+  threw on every call.
 - AVIF, JPEG XL and OxiPNG failed for long-returning visitors while WebP and MozJPEG kept
   working — the three that have threaded wasm builds. Their emscripten pthread scripts are
   content-hashed and served `immutable, max-age=1y`, so a browser that fetched them before

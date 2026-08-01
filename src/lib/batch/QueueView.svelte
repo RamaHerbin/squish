@@ -34,7 +34,8 @@
   } from './format';
   import { acceptsDrop, messageOf, type BatchQueueStore } from './queue.svelte';
   import { createThumbnailCache, type ThumbnailCache } from './thumbnails';
-  import { downloadZip } from './zip';
+  import { downloadZip, zippableItems } from './zip';
+  import { canShareFiles, shareFiles } from '../platform';
 
   interface Props {
     /** The queue store. Owns items, workers and staged outputs. */
@@ -136,7 +137,11 @@
       const next = waiting.shift();
       if (next) next();
     };
-    return async <T>(task: () => Promise<T>): Promise<T> => {
+    // A named function expression, not a generic arrow: `async <T>(task) => …`
+    // inside a `.svelte` script compiles to `async () => …` — the type
+    // parameter takes the argument list with it — and the body then throws
+    // `ReferenceError: task is not defined` on every call.
+    return async function limited<T>(task: () => Promise<T>): Promise<T> {
       if (active >= max) await new Promise<void>((resolve) => waiting.push(resolve));
       active++;
       try {
@@ -320,6 +325,42 @@
   const downloadLabel = $derived(exporting ? `Exporting ${Math.round(exportProgress * 100)}%` : 'Download .zip');
 
   /* ------------------------------------------------------------------ */
+  /* Share                                                                */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * The finished outputs themselves, not the archive.
+   *
+   * Two reasons. `exportZip` is async, and `navigator.share` needs the user
+   * gesture still to be live — awaiting a zip build spends it, and Safari
+   * refuses what comes after. And a batch that arrives as eight JPEGs over
+   * AirDrop is more use to the person receiving it than one zip.
+   *
+   * `outFile` is already a `File` even when the queue staged it to OPFS, so
+   * there is nothing to read here: the browser reads the bytes itself, after
+   * the sheet is up.
+   */
+  const shareableOutputs = $derived(
+    zippableItems(queue.items)
+      .map((item) => item.outFile)
+      .filter((file): file is File => file !== undefined),
+  );
+
+  /** Hidden rather than disabled: the browser caps how many files a share may
+      carry, and `canShare` is the only honest way to ask. */
+  const shareable = $derived(canShareFiles(shareableOutputs));
+
+  let shareError = $state<string | undefined>(undefined);
+
+  function shareOutputs(): void {
+    shareError = undefined;
+    // No await before `navigator.share` — see the note above.
+    shareFiles(shareableOutputs).catch((error) => {
+      shareError = messageOf(error);
+    });
+  }
+
+  /* ------------------------------------------------------------------ */
   /* Row presentation                                                     */
   /* ------------------------------------------------------------------ */
 
@@ -486,6 +527,9 @@
         </Popover>
 
         <PillButton variant="outline" size={44} onclick={() => filesInput?.click()}>Add files</PillButton>
+        {#if shareable}
+          <PillButton variant="outline" size={44} onclick={shareOutputs}>Share</PillButton>
+        {/if}
         <PillButton
           variant="solid"
           size={44}
@@ -499,6 +543,9 @@
 
     {#if exportError}
       <p class="banner" role="alert">Export failed: {exportError}</p>
+    {/if}
+    {#if shareError}
+      <p class="banner" role="alert">Share failed: {shareError}</p>
     {/if}
     {#if sizeNote}
       <p class="banner" role="alert">{sizeNote}</p>
@@ -677,15 +724,21 @@
         </div>
         <span>{progress.done + progress.errored} / {progress.total}</span>
       </div>
-      <button
-        type="button"
-        class="dl-mobile"
-        disabled={progress.done === 0 || exporting}
-        onclick={exportArchive}
-      >
-        <span>{downloadLabel}</span>
-        <span class="dl-size">{formatBytes(progress.bytesOut)}</span>
-      </button>
+      <div class="footer-actions">
+        <button
+          type="button"
+          class="dl-mobile"
+          disabled={progress.done === 0 || exporting}
+          onclick={exportArchive}
+        >
+          <span>{downloadLabel}</span>
+          <span class="dl-size">{formatBytes(progress.bytesOut)}</span>
+        </button>
+
+        {#if shareable}
+          <button type="button" class="share-mobile" onclick={shareOutputs}>Share</button>
+        {/if}
+      </div>
     </div>
   {/if}
 
@@ -1416,6 +1469,33 @@
 
     .dl-mobile .dl-size {
       color: var(--cream-faint);
+    }
+
+    .footer-actions {
+      display: flex;
+      align-items: stretch;
+      gap: var(--space-3);
+    }
+
+    /* The zip keeps the row; Share takes only its own width. */
+    .footer-actions .dl-mobile {
+      flex: 1;
+      min-inline-size: 0;
+    }
+
+    .share-mobile {
+      flex: none;
+      padding-inline: var(--space-5);
+      height: var(--h-control-xl);
+      border: var(--border-ink);
+      border-radius: var(--radius-pill);
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--font-mono);
+      font-size: var(--fs-sm);
+      font-weight: 700;
+      letter-spacing: var(--tracking-mono-wider);
+      text-transform: uppercase;
     }
   }
 

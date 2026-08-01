@@ -13,8 +13,8 @@
    * editor needs to interleave something between them.
    *
    * Both builds are rendered and CSS picks one, so there is no layout flash on
-   * resize and no `matchMedia` to keep in sync. The ⌘S shortcut is registered
-   * once, by `Toolbar`, and therefore works at every width.
+   * resize and no `matchMedia` to keep in sync. The ⌘S and ⇧⌘S shortcuts are
+   * registered once, by `Toolbar`, and therefore work at every width.
    */
   import AdvancedDrawer from './AdvancedDrawer.svelte';
   import MobileSheet from './MobileSheet.svelte';

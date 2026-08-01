@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   basenameOf,
+  canShareFiles,
   extensionOf,
   isTauri,
   mimeTypeForPath,
@@ -11,6 +12,7 @@ import {
   sanitizeSuggestedName,
   saveBlob,
   saveFiltersFor,
+  shareFiles,
 } from './index';
 
 /**
@@ -259,6 +261,129 @@ describe('saveBlob on the web', () => {
 
     await expect(saveBlob('beach.avif', new Blob(['x']))).resolves.toBe('saved');
     vi.unstubAllGlobals();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Sharing                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/** jsdom ships no Web Share API, so both halves are installed per test. */
+function stubShare(options: { canShare: boolean; share?: () => Promise<void> }): {
+  canShare: ReturnType<typeof vi.fn>;
+  share: ReturnType<typeof vi.fn>;
+} {
+  const canShare = vi.fn(() => options.canShare);
+  const share = vi.fn(options.share ?? (() => Promise.resolve()));
+  Object.assign(navigator, { canShare, share });
+  return { canShare, share };
+}
+
+function clearShare(): void {
+  delete (navigator as Partial<Navigator>).canShare;
+  delete (navigator as Partial<Navigator>).share;
+}
+
+const PNG = new File([new Uint8Array([1, 2, 3])], 'beach.png', { type: 'image/png' });
+
+describe('canShareFiles', () => {
+  afterEach(() => {
+    clearShare();
+    delete (globalThis as Record<string, unknown>).isTauri;
+  });
+
+  it('is false when the browser has no Web Share API at all', () => {
+    expect(canShareFiles([PNG])).toBe(false);
+  });
+
+  it('is false when `share` exists but `canShare` does not', () => {
+    Object.assign(navigator, { share: vi.fn() });
+    expect(canShareFiles([PNG])).toBe(false);
+  });
+
+  it('is false for an empty list, without asking the browser', () => {
+    const { canShare } = stubShare({ canShare: true });
+    expect(canShareFiles([])).toBe(false);
+    expect(canShare).not.toHaveBeenCalled();
+  });
+
+  it('asks the browser about the real files, and relays its answer', () => {
+    const { canShare } = stubShare({ canShare: true });
+    expect(canShareFiles([PNG])).toBe(true);
+    expect(canShare).toHaveBeenCalledWith({ files: [PNG] });
+  });
+
+  it('is false when the browser refuses the type — JPEG XL is on no allowlist', () => {
+    stubShare({ canShare: false });
+    expect(canShareFiles([new File([], 'beach.jxl', { type: 'image/jxl' })])).toBe(false);
+  });
+
+  it('is false when `canShare` throws', () => {
+    Object.assign(navigator, {
+      share: vi.fn(),
+      canShare: () => {
+        throw new TypeError('nope');
+      },
+    });
+    expect(canShareFiles([PNG])).toBe(false);
+  });
+
+  it('is false under Tauri even when the webview would say yes', () => {
+    stubShare({ canShare: true });
+    (globalThis as Record<string, unknown>).isTauri = true;
+    // No share plugin is installed; a Share button that fell back to the save
+    // panel would lie about what it does.
+    expect(canShareFiles([PNG])).toBe(false);
+  });
+});
+
+describe('shareFiles', () => {
+  afterEach(() => {
+    clearShare();
+  });
+
+  it('calls `navigator.share` synchronously, so the gesture survives', () => {
+    const { share } = stubShare({ canShare: true });
+
+    // Not awaited on purpose: Safari rejects a share whose transient
+    // activation was already spent, so nothing may be awaited before the call.
+    void shareFiles([PNG]);
+
+    expect(share).toHaveBeenCalledOnce();
+    expect(share).toHaveBeenCalledWith({ files: [PNG] });
+  });
+
+  it('passes title and text along with the files', async () => {
+    const { share } = stubShare({ canShare: true });
+    await shareFiles([PNG], { title: 'Pinch' });
+    expect(share).toHaveBeenCalledWith({ title: 'Pinch', files: [PNG] });
+  });
+
+  it('reports shared', async () => {
+    stubShare({ canShare: true });
+    await expect(shareFiles([PNG])).resolves.toBe('shared');
+  });
+
+  it('reports unsupported without touching `navigator.share`', async () => {
+    const { share } = stubShare({ canShare: false });
+    await expect(shareFiles([PNG])).resolves.toBe('unsupported');
+    expect(share).not.toHaveBeenCalled();
+  });
+
+  it('reads a dismissed sheet as cancelled, not as a failure', async () => {
+    stubShare({
+      canShare: true,
+      share: () => Promise.reject(new DOMException('user aborted', 'AbortError')),
+    });
+    await expect(shareFiles([PNG])).resolves.toBe('cancelled');
+  });
+
+  it('rethrows a real platform failure', async () => {
+    stubShare({
+      canShare: true,
+      share: () => Promise.reject(new DOMException('permission denied', 'NotAllowedError')),
+    });
+    await expect(shareFiles([PNG])).rejects.toThrow('permission denied');
   });
 });
 

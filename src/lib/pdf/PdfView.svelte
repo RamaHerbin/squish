@@ -40,7 +40,7 @@
     type PdfImageOutcome,
   } from '../contracts';
   import { formatBytes, formatSavings, formatSsim } from '../options';
-  import { saveBlob } from '../platform';
+  import { canShareFiles, saveBlob, shareFiles } from '../platform';
   import {
     Chip,
     EditorialCheckbox,
@@ -277,6 +277,29 @@
     } catch (error) {
       saveError = error instanceof Error ? error.message : 'Could not save the file.';
     }
+  }
+
+  /**
+   * An empty stand-in, because the browser answers on the file's *type* and on
+   * how many there are — never on the bytes. Building the real 150 MB `File`
+   * merely to decide whether a button exists would be a copy per keystroke of
+   * the settings rail.
+   */
+  const shareProbe = new File([], 'document.pdf', { type: PDF_MIME_TYPE });
+  const shareable = $derived(result !== undefined && canShareFiles([shareProbe]));
+
+  function share(): void {
+    const done = job.result;
+    if (!done) return;
+    saveError = undefined;
+    // Nothing awaited before `navigator.share`: the gesture has to still be
+    // live when the sheet is asked for. `new File` copies the bytes, so pdf.js
+    // detaching `done.bytes` for a preview afterwards cannot empty the share.
+    shareFiles([new File([done.bytes], `${stem}-compressed.pdf`, { type: PDF_MIME_TYPE })]).catch(
+      (error) => {
+        saveError = error instanceof Error ? error.message : 'Could not share the file.';
+      },
+    );
   }
 
   /* ------------------------------------------------------------------ */
@@ -557,6 +580,10 @@
         <span>Download PDF</span>
         {#if result}<span class="download-size mono">{formatBytes(result.outBytes)}</span>{/if}
       </button>
+
+      {#if shareable}
+        <PillButton variant="outline" size={52} onclick={share}>Share</PillButton>
+      {/if}
     </div>
 
     <!-- -------------------------------------------------------- results -->

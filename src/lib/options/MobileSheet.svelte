@@ -3,7 +3,8 @@
    * The 390px editor sheet of comp 06b: a row of codec pills (plus a `▾` that
    * opens the full encoder list), the quality slider with a 20px thumb, one
    * line of metrics, the "Advanced settings ›" row, and a 52px download pill
-   * carrying the output size.
+   * carrying the output size — beside an outline Share pill when the platform
+   * has a share sheet to offer.
    *
    * Same props as `Toolbar` — the editor hands both the identical data and
    * lets CSS decide which one is on screen (see `EditorControls`).
@@ -34,6 +35,7 @@
     metricsNote,
     onDownload,
     downloadDisabled = false,
+    onShare,
     advancedOpen,
     onAdvancedToggle,
   }: MobileSheetProps = $props();
@@ -142,24 +144,36 @@
       <p class="error mono-label mono-label--xs">{error}</p>
     {/if}
 
-    <PillButton
-      size={52}
-      variant="solid"
-      fullWidth
-      disabled={!canDownload}
-      onclick={() => onDownload?.()}
-    >
-      Download
-      {#snippet trailing()}
-        <span class="download-size">
-          {#if outputBytes === undefined}
-            {encoding ? 'Encoding…' : '—'}
-          {:else}
-            {formatBytes(outputBytes)} · {formatSavings(originalBytes, outputBytes)}
-          {/if}
-        </span>
-      {/snippet}
-    </PillButton>
+    <!-- Wrappers rather than classes on the pills: the primitive owns its own
+         class list, so the row's flex sizing lives outside it. -->
+    <div class="actions">
+      <div class="action-grow">
+        <PillButton
+          size={52}
+          variant="solid"
+          fullWidth
+          disabled={!canDownload}
+          onclick={() => onDownload?.()}
+        >
+          Download
+          {#snippet trailing()}
+            <span class="download-size">
+              {#if outputBytes === undefined}
+                {encoding ? 'Encoding…' : '—'}
+              {:else}
+                {formatBytes(outputBytes)} · {formatSavings(originalBytes, outputBytes)}
+              {/if}
+            </span>
+          {/snippet}
+        </PillButton>
+      </div>
+
+      {#if onShare}
+        <PillButton size={52} variant="outline" disabled={!canDownload} onclick={() => onShare?.()}>
+          Share
+        </PillButton>
+      {/if}
+    </div>
   </div>
 </section>
 
@@ -261,6 +275,20 @@
 
   .error {
     color: var(--accent-red);
+  }
+
+  .actions {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  /* Download keeps the whole row when Share is absent, and yields exactly what
+     Share needs when it is there. `min-inline-size: 0` so the size trailer
+     truncates instead of pushing Share off the sheet. */
+  .action-grow {
+    flex: 1;
+    min-inline-size: 0;
   }
 
   .download-size {
