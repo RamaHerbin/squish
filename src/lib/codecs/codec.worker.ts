@@ -38,6 +38,7 @@ import {
   type WorkerEncoderId,
   type WorkerResizeOptions,
 } from '../contracts';
+import { drawableToImageData } from './canvas';
 import { applyNestedWorkerWorkaround } from './capabilities';
 import { rotateTransferable } from './rotate';
 
@@ -163,9 +164,17 @@ const loadWebpDecoder = () => loadOnce('dec:webp', () => import('@jsquash/webp/d
 const loadJpegDecoder = () => loadOnce('dec:jpeg', () => import('@jsquash/jpeg/decode'));
 const loadPngDecoder = () => loadOnce('dec:png', () => import('@jsquash/png/decode'));
 const loadQoiDecoder = () => loadOnce('dec:qoi', () => import('@jsquash/qoi/decode'));
-// libheif (via heic-decode) — decode only; HEIC encoding is patent-encumbered
-// and has no maintained wasm encoder.
-const loadHeicDecoder = () => loadOnce('dec:heic', () => import('heic-decode'));
+// libheif 1.22.x (via heic-to) — decode only; HEIC encoding is patent-encumbered
+// and has no maintained wasm encoder. heic-to runs libheif in its own nested
+// worker (spawned from a blob: URL, so it inherits this worker's COEP) and is
+// the only npm package tracking current libheif — 1.19.8, the newest
+// libheif-js, mangles Apple's 10-bit 4:4:4 bitstreams (iPhone screenshots).
+// `type: 'bitmap'` is forced: heic-to's only other output mode goes through
+// `document.createElement('canvas')`, which does not exist in a worker. The
+// bitmap→canvas→getImageData round-trip premultiplies alpha, so a rare HEIC
+// with real transparency loses some precision in semi-transparent pixels —
+// the price of not forking the package.
+const loadHeicDecoder = () => loadOnce('dec:heic', () => import('heic-to'));
 
 const loadResizer = () => loadOnce('resize', () => import('@jsquash/resize'));
 
@@ -248,9 +257,16 @@ async function decodeImage(
     }
     case 'image/heic':
     case 'image/heif': {
-      const { default: decode } = await loadHeicDecoder();
-      const { width, height, data } = await decode({ buffer: new Uint8Array(buffer) });
-      return new ImageData(new Uint8ClampedArray(data), width, height);
+      const { heicTo } = await loadHeicDecoder();
+      const bitmap = await heicTo({
+        blob: new Blob([buffer], { type: mimeType }),
+        type: 'bitmap',
+      });
+      try {
+        return drawableToImageData(bitmap);
+      } finally {
+        bitmap.close();
+      }
     }
   }
 }

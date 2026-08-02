@@ -30,9 +30,9 @@ Two reasons, and the second is the one that actually decides it.
    aside, there is nothing to build against that could be depended on.
 
 Decoding is a different matter and is fully supported: Safari decodes HEIC natively, and
-everywhere else Pinch falls back to libheif compiled to wasm (`heic-decode` →
-`libheif-js`). So iPhone photos open fine — you just convert them to AVIF, JPEG XL, WebP
-or JPEG on the way out, which is usually what you wanted anyway.
+everywhere else Pinch falls back to a bundled build of libheif 1.22.x (the `heic-to`
+package). So iPhone photos open fine — you just convert them to AVIF, JPEG XL, WebP or
+JPEG on the way out, which is usually what you wanted anyway.
 
 ## Why can't I encode HDR?
 
