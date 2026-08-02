@@ -12,6 +12,7 @@ import {
   isEncoderId,
   isPreset,
   isSideSettingsFor,
+  isWorkerDecodableMimeType,
   mimeTypeFromFilename,
   preprocessorStateEqual,
   processorStateEqual,
@@ -139,6 +140,29 @@ describe('mime sniffing', () => {
     expect(replaceExtension('photo.png', 'webp')).toBe('photo.webp');
     expect(replaceExtension('my.photo.png', 'avif')).toBe('my.photo.avif');
     expect(replaceExtension('photo', 'jxl')).toBe('photo.jxl');
+  });
+});
+
+describe('worker-decodable mime types', () => {
+  it('keeps HEIC/HEIF on the worker path', () => {
+    // Load-bearing beyond the type union: four call sites route decoding on
+    // this predicate (decode, engine, batch, matrix), and dropping heic/heif
+    // here would silently strip Chrome and Firefox (no native HEIC) of
+    // iPhone-photo support — the settings panel's "Browser, wasm fallback"
+    // copy would go quietly false too.
+    expect(isWorkerDecodableMimeType('image/heic')).toBe(true);
+    expect(isWorkerDecodableMimeType('image/heif')).toBe(true);
+  });
+
+  it('accepts every wasm decoder and rejects outsiders', () => {
+    const wasmDecodable =
+      ['image/avif', 'image/jxl', 'image/webp', 'image/jpeg', 'image/png', 'image/qoi'];
+    for (const mime of wasmDecodable) {
+      expect(isWorkerDecodableMimeType(mime)).toBe(true);
+    }
+    expect(isWorkerDecodableMimeType('image/gif')).toBe(false);
+    expect(isWorkerDecodableMimeType('image/svg+xml')).toBe(false);
+    expect(isWorkerDecodableMimeType('')).toBe(false);
   });
 });
 

@@ -251,7 +251,10 @@ export default defineConfig({
         // Codec-sized JS stays out of the shell precache — sw.ts runtime-caches
         // it in the wasm tier on first HEIC decode instead.
         globIgnores: [
-          '**/heic-decode-*.js',
+          // Hash-width pinned like `pdf-????????.js` below, and for the same
+          // reason: `heic-to-*.js` would also swallow a future
+          // `heic-to-anything-<hash>.js` app chunk out of the precache.
+          '**/heic-to-????????.js',
           // pdf.js, same policy: a ~2 MB worker script plus a ~430 KB library
           // chunk, neither of which sits under the 5 MB cap for any better
           // reason than that it happens to. Both are dead weight for every

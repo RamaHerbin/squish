@@ -503,7 +503,7 @@ the only module allowed to import it.
 static import would drop ~455 KB of renderer into the entry chunk every visitor downloads,
 PDF or not. `openPdfRenderer()` imports it on first call and Rollup cuts it into a chunk of its own.
 Code-splitting alone is not enough, though: `injectManifest.globIgnores` has to exclude that
-chunk and the worker as well, exactly as it already does for heic-decode, or the shell
+chunk and the worker as well, exactly as it already does for heic-to, or the shell
 precache pulls both back down for every visitor at install time. The worker arrives as a
 `?url` import — a build-time string naming an emitted asset, not code. Plain `?url` rather
 than `?worker&url`, because re-bundling renames `pdf.worker.min.mjs` to `.js`, which *is* one
@@ -573,8 +573,8 @@ express. The worker source is `src/lib/shell/sw.ts`.
 1. **Shell precache** — JS, CSS, HTML, icons and the manifest, listed at build time by
    `injectManifest.globPatterns`, with a 5 MB per-file ceiling. This is what makes the
    app load offline.
-2. **Codec runtime tier** — `.wasm` files, plus the `heic-decode-*.js` chunk (a ~1.4 MB
-   JS file with the libheif wasm inlined as base64, hence `globIgnores`), are
+2. **Codec runtime tier** — `.wasm` files, plus the `heic-to-*.js` chunk (a ~3 MB JS
+   file carrying libheif compiled to plain JavaScript, hence `globIgnores`), are
    deliberately left *out* of the precache and served `CacheFirst` from the
    `squish-wasm-codecs` cache (32 entries, one-year expiry). Codec payloads are large
    and only some are used per session, so the first pick of a codec pays for the fetch

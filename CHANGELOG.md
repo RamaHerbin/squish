@@ -93,6 +93,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The update toast's **Reload** button now actually reloads. A waiting service worker was
   told to activate but the page was never refreshed, so the new version only appeared on
   the next manual reload.
+- iPhone screenshots — and any other Apple 10-bit 4:4:4 HEIC — opened as a grid of
+  misaligned coloured tiles instead of the picture, in browsers with no native HEIC
+  decoder. Those are the ones that fall back to the bundled libheif, and the bundled
+  build was 1.19.8, which mangles that particular bitstream; it is now 1.22.2, which
+  reads it correctly. Safari and the macOS app decode HEIC through the platform and
+  were not affected.
 - `npm ci` no longer fails lockfile validation on Linux runners, where rolldown's
   platform-filtered optional dependency made npm compute a different ideal tree than the
   machine that wrote the lock.
