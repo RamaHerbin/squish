@@ -24,7 +24,7 @@ to offer, with one exception noted below; it asks the platform.
 | Threaded wasm (`SharedArrayBuffer`) | Verified, needs COOP/COEP | Expected, needs COOP/COEP | Expected, needs COOP/COEP | jSquash selects single-threaded builds; slower, same output |
 | wasm SIMD | Verified | Expected | Expected | jSquash selects the non-SIMD build |
 | `ImageDecoder` (WebCodecs) decode path | Verified | Expected where shipped | Expected where shipped | Falls back to `createImageBitmap`, then an `<img>` element |
-| HEIC / HEIF input | Verified (wasm path) | Expected (wasm path) | Expected (native decode first, wasm fallback) | Nothing — libheif wasm is the fallback everywhere |
+| HEIC / HEIF input | Verified (bundled libheif) | Expected (bundled libheif) | Expected (native decode first, libheif fallback) | Nothing — the bundled libheif build is the fallback everywhere |
 | JPEG XL input, and decoding JXL *output* for the preview | Verified (wasm path) | Expected (wasm path) | Expected (wasm path) | Nothing — JXL always decodes through wasm |
 | AVIF input | Verified (native, wasm fallback) | Expected (native, wasm fallback) | Expected (native, wasm fallback) | The wasm decoder takes over |
 | Browser canvas encoders (PNG / JPEG / WebP) | Verified | Expected | Expected for PNG/JPEG; WebP probed | Each is probed individually and hidden from the list if unsupported |
@@ -101,9 +101,18 @@ canvas and for the SSIM comparison. That works in every browser with WebAssembly
 ### HEIC
 
 Safari decodes HEIC natively, so on Apple platforms the native path usually wins and no
-extra bytes are downloaded. Everywhere else the file goes through `heic-decode` →
-`libheif-js`, shipped as a ~1.4 MB chunk that is runtime-cached on first use rather than
-precached (see `src/lib/shell/sw.ts`). Decoding only — there is no HEIC encoder.
+extra bytes are downloaded. Everywhere else the file goes through `heic-to`, which carries
+libheif 1.22.x built with Emscripten's `wasm2js` — plain JavaScript rather than a `.wasm`
+binary, so it is a ~3 MB chunk and no separate wasm file is fetched. It is runtime-cached
+on first use rather than precached (see `src/lib/shell/sw.ts`). That build decodes about
+2.4× slower than the wasm one it replaced (measured: 275 ms vs 114 ms warm for a 3.8 MP
+file, headless Chromium), which is the price of correctness: the previous decoder
+scrambled Apple's 10-bit 4:4:4 files — iPhone screenshots — into misaligned coloured
+tiles. Peak memory is also higher than the old in-process path — the file and the decoded
+surface each exist in several copies across heic-to's nested worker boundary — so a very
+large HEIC costs a few hundred MB transiently on the wasm path. Two more caveats worth a
+line: heic-to's default build uses `new Function` internally (if a CSP ever lands, switch
+the import to `heic-to/csp`), and decoding only — there is no HEIC encoder.
 
 ### Canvas encoders are probed by output, not by name
 

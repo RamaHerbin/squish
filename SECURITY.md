@@ -15,8 +15,8 @@ but it doesn't remove it:
   bug in a wasm codec is a real, in-scope class of issue, even though it's
   upstream (in [jSquash](https://github.com/jamsinclair/jSquash) or
   [libheif](https://github.com/strukturag/libheif) via
-  [heic-decode](https://github.com/catdad-experiments/heic-decode)) rather
-  than in this repository's own code.
+  [heic-to](https://github.com/hoppergee/heic-to)) rather than in this
+  repository's own code.
 - The service worker and PWA install/update path is part of the trusted
   computing base of the app.
 
@@ -64,5 +64,5 @@ This is a solo-maintained, spare-time project — there's no security team and
 no SLA. I'll do my best to acknowledge a report within a reasonable time and
 fix confirmed issues as quickly as I reasonably can, but "best-effort" is the
 honest description. If an issue turns out to be in an upstream dependency
-(jSquash, libheif/heic-decode, a browser itself), I'll help route it there
+(jSquash, libheif/heic-to, a browser itself), I'll help route it there
 too.

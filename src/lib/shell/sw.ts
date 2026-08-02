@@ -172,7 +172,8 @@ const codecContentTypeGuard: WorkboxPlugin = {
       // so the only fix is to never write it. Nothing is lost by refusing: a
       // response the browser won't start a worker from is worth exactly as much
       // offline as it is online. Left off the heic chunk, which is imported
-      // rather than spawned and so has never cared.
+      // rather than spawned — the nested worker heic-to creates comes from a
+      // blob: URL and inherits the codec worker's COEP, not this response's.
       const usable = !isPdfJsWorker(pathname) || coepAllowsWorker(response);
       return contentType.includes('javascript') && usable ? response : null;
     }
@@ -187,9 +188,10 @@ const codecContentTypeGuard: WorkboxPlugin = {
 };
 
 registerRoute(
-  // The heic-decode chunk is a ~1.4 MB JS file with the libheif wasm inlined
-  // as base64 — codec-sized, so it joins the wasm runtime tier (and is
-  // globIgnored from the precache manifest in vite.config.ts).
+  // The heic-to chunk is a ~3 MB JS file carrying libheif compiled to plain
+  // JavaScript (Emscripten wasm2js, no separate .wasm fetch) — codec-sized, so
+  // it joins the wasm runtime tier (and is globIgnored from the precache
+  // manifest in vite.config.ts).
   //
   // pdf.js's three `.wasm` files are excluded by prefix rather than left to
   // registration order. Workbox does match routes in the order they're
@@ -200,7 +202,7 @@ registerRoute(
   ({ url }) =>
     !url.pathname.startsWith(PDFJS_ASSET_PREFIX) &&
     (url.pathname.endsWith('.wasm') ||
-      (url.pathname.includes('heic-decode-') && url.pathname.endsWith('.js'))),
+      /\/heic-to-[^/]{8}\.js$/.test(url.pathname)),
   new CacheFirst({
     cacheName: 'squish-wasm-codecs',
     plugins: [

@@ -220,50 +220,64 @@ here, since the BSD terms ask for the notice to accompany the binary form.
 
 ## HEIC/HEIF decoding (LGPL-3.0 component)
 
-Pinch decodes HEIC/HEIF input (iPhone photos) through **heic-decode**, which
-wraps the **libheif** WebAssembly build published as **libheif-js**. This is
-the one runtime dependency under a copyleft license, so it gets its own
+Pinch decodes HEIC/HEIF input (iPhone photos) through **heic-to**, which
+bundles a **libheif** build compiled all the way to JavaScript. This is the
+one runtime dependency under a copyleft license, so it gets its own
 paragraph.
 
-- **heic-decode** — npm `heic-decode@2.1.0`, license **ISC** (per
-  `node_modules/heic-decode/package.json`; the package does not ship its own
-  bundled `LICENSE` file). Author: Kiril Vatev. Upstream:
-  <https://github.com/catdad-experiments/heic-decode>. This is a thin
-  Promise-based wrapper around `libheif-js`; it contains no codec code of
-  its own.
-- **libheif-js** — npm `libheif-js@1.19.8`, an Emscripten (wasm) build of
-  **libheif** published by catdad-experiments. Upstream:
-  <https://github.com/catdad-experiments/libheif-js>, wrapping
-  <https://github.com/strukturag/libheif>. License: **LGPL-3.0**, per
-  `node_modules/libheif-js/package.json` and the full GNU LGPLv3 text at
-  `node_modules/libheif-js/LICENSE` / `node_modules/libheif-js/libheif/LICENSE`.
-  libheif's own upstream license note (bundled verbatim in that same file)
-  reads: "The library `libheif` is distributed under the terms of the GNU
-  Lesser General Public License. The sample applications and the Go and C++
-  wrappers are distributed under the terms of the MIT License."
-- **libde265**, the HEVC decoder libheif calls into for HEIC frame decoding,
-  is compiled into the same wasm bundle (`libheif-wasm/libheif-bundle.js`
-  contains its own version string). libde265 is licensed under **LGPL-3.0**
-  by its upstream project: <https://github.com/strukturag/libde265>.
+- **heic-to** — npm `heic-to@1.5.2`, license **LGPL-3.0**, per
+  `node_modules/heic-to/package.json` and the full GNU LGPLv3 text at
+  `node_modules/heic-to/LICENSE`, which opens with the project's own grant:
+  "heic-to is free software: you can redistribute it and/or modify it under
+  the terms of the GNU Lesser General Public License as published by the
+  Free Software Foundation, either version 3 of the License, or (at your
+  option) any later version." Author: Hopper Gee. Upstream:
+  <https://github.com/hoppergee/heic-to>. Note the difference from every
+  codec above: the wrapper is not a permissive shell around a copyleft core,
+  it is LGPL itself, so the whole imported chunk is LGPL-3.0.
+- **libheif** — the codec, Emscripten-compiled and shipped inside that same
+  package as `src/lib/libheif.js`, whose first line records the build:
+  `// Build from libheif 1.22.2 with LIBDE265_VERSION=1.0.16`. License:
+  **LGPL-3.0**. Upstream: <https://github.com/strukturag/libheif>. libheif's
+  own upstream license note reads: "The library `libheif` is distributed
+  under the terms of the GNU Lesser General Public License. The sample
+  applications and the Go and C++ wrappers are distributed under the terms
+  of the MIT License."
+- **libde265** 1.0.16, the HEVC decoder libheif calls into for HEIC frame
+  decoding, is compiled into that same file rather than loaded beside it
+  (the built module exports `de265_get_version`). libde265 is licensed under
+  **LGPL-3.0** by its upstream project:
+  <https://github.com/strukturag/libde265>.
+
+Unlike the `@jsquash/*` codecs, nothing here is a `.wasm` binary: heic-to
+ships Emscripten's `wasm2js` output, so libheif arrives as ~3 MB of ordinary
+JavaScript with no separate wasm file to fetch. That changes the payload's
+size and its speed, not its licensing.
 
 **How Pinch uses it, and why this satisfies LGPL-3.0:**
 
-- Pinch imports `heic-decode` unmodified, as published on npm — no source
-  file in `libheif-js` or `heic-decode` has been forked, patched, or
-  recompiled for this project. See `src/lib/codecs/codec.worker.ts`
-  (`const loadHeicDecoder = () => loadOnce('dec:heic', () =>
-  import('heic-decode'))`) — it is a dynamic `import()`, loaded only when a
-  HEIC/HEIF file is actually opened, inside a Web Worker.
+- Pinch imports `heic-to` unmodified, as published on npm — no file in the
+  package has been forked, patched, or recompiled for this project, and the
+  libheif/libde265 build it carries is the one its author published. See
+  `src/lib/codecs/codec.worker.ts` (`const loadHeicDecoder = () =>
+  loadOnce('dec:heic', () => import('heic-to'))`) — it is a dynamic
+  `import()`, loaded only when a HEIC/HEIF file is actually opened on a
+  browser with no native HEIC decoder, inside a Web Worker.
 - LGPL-3.0 §4 permits combining an unmodified LGPL library with an
   application under any license, provided the LGPL component can be swapped
-  out and its corresponding source is available. Both hold here: the wasm
-  build is dynamically loaded as a discrete, replaceable module (not statically
-  linked into Pinch's own bundle in a way that obscures the boundary), and
-  full corresponding source for libheif and libde265 is public upstream at
-  the repositories linked above (and, for the exact wasm build in use,
-  at <https://github.com/catdad-experiments/libheif-js>).
+  out and its corresponding source is available. Both hold here: the build is
+  dynamically loaded as a discrete, replaceable chunk — Rollup emits it as
+  its own `heic-to-*.js` file, which `vite.config.ts` names in `globIgnores`
+  and `src/lib/shell/sw.ts` routes by that prefix, so the boundary is
+  addressable rather than buried in Pinch's own bundle — and full
+  corresponding source is public upstream: libheif and libde265 at the
+  repositories linked above, heic-to's own wrapper source at
+  <https://github.com/hoppergee/heic-to>, and, in that repository's README,
+  the procedure used to regenerate the shipped `libheif.js` (libheif's own
+  `build-emscripten.sh` run with `USE_WASM=0`, which is what makes the
+  output JavaScript rather than wasm).
 - Pinch itself adds no HEIC/HEIF *encoding* — decode-only, deliberately
-  (`src/lib/codecs/codec.worker.ts`: "libheif (via heic-decode) — decode
+  (`src/lib/codecs/codec.worker.ts`: "libheif 1.22.x (via heic-to) — decode
   only; HEIC encoding is patent-encumbered").
 
 ---
@@ -306,7 +320,7 @@ completeness, not because they impose runtime obligations.
 
 A full scan of every `package.json` under `node_modules` (431 packages at
 time of writing, dev and runtime combined) found one `LGPL-3.0` package
-(`libheif-js`, covered above) and two files under weak-copyleft or
+(`heic-to`, covered above) and two files under weak-copyleft or
 attribution licenses, both build-time-only and neither shipped in the app
 bundle:
 

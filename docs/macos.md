@@ -92,10 +92,9 @@ Pinch compresses images.
   default opener for anything; that choice stays with Finder or with whichever app you
   had before.
 - **HEIC decoding.** iPhone photos already open in the web app for anyone on Safari,
-  because Safari decodes HEIC natively and only falls back to the bundled libheif
-  WebAssembly decoder elsewhere. The macOS app uses that same native-decode-first path
-  every time, since its webview is Safari's engine. The wasm fallback is still there; it
-  just has less to do.
+  because Safari decodes HEIC natively and only falls back to the bundled libheif decoder
+  elsewhere. The macOS app uses that same native-decode-first path every time, since its
+  webview is Safari's engine. The fallback is still there; it just has less to do.
 - **No service worker, and that is fine.** Service workers are how the web app stays
   installable and works offline, and WKWebView does not run them on Tauri's custom
   `tauri://` scheme, so that code path is inactive in the native build. It is not needed

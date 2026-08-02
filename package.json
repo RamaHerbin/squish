@@ -50,7 +50,7 @@
     "@tauri-apps/plugin-opener": "^2.5.4",
     "comlink": "^4.4.2",
     "fflate": "^0.8.3",
-    "heic-decode": "^2.1.0",
+    "heic-to": "^1.5.2",
     "idb-keyval": "^6.3.0",
     "pdfjs-dist": "^6.2.108"
   }

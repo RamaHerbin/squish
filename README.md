@@ -171,7 +171,7 @@ Full write-up, with file paths: [docs/architecture.md](./docs/architecture.md).
 
 Core editing works in any current Chromium, Firefox or Safari. Everything beyond that is
 feature-detected at runtime and degrades rather than failing: no `crossOriginIsolated`
-means single-threaded wasm; no native HEIC decoder means the libheif wasm path; no OPFS
+means single-threaded wasm; no native HEIC decoder means the bundled libheif; no OPFS
 means batch results stay in memory; no `launchQueue` means no "Open with Pinch".
 
 Feature-by-feature matrix, and what was actually tested versus inferred:
@@ -215,7 +215,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the details, and
 MIT © 2026 Rama Herbin. See [LICENSE](./LICENSE).
 
 Codecs are third-party: the `@jsquash/*` builds are Apache-2.0, and HEIC decoding uses
-`libheif-js` (LGPL-3.0), loaded as a separate dynamically-imported chunk. The PDF side
+`heic-to` (LGPL-3.0), loaded as a separate dynamically-imported chunk. The PDF side
 uses `@cantoo/pdf-lib` (MIT) to rewrite documents and `pdfjs-dist` (Apache-2.0) to
 rasterise a page for the preview. Full attributions, including the wasm decoders pdf.js
 bundles, are in [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
