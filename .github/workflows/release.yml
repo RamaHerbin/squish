@@ -1,0 +1,85 @@
+name: Release
+
+# release-please watches main and keeps one open "release PR" that carries the
+# next version: the bumped files plus the CHANGELOG section it derives from the
+# Conventional Commits landed since the last tag. Merging that PR is what cuts
+# the release — it creates the `v*` tag and a *draft* GitHub Release, which
+# `macos.yml` then attaches the universal DMG to.
+#
+# So this workflow runs on every push to main, but it only ever writes a pull
+# request. Nothing is tagged until a human merges one.
+#
+# The configuration lives in two files, not here:
+#
+#   release-please-config.json    what to bump, and how (JSON, so it cannot
+#                                 carry comments — see CONTRIBUTING.md)
+#   .release-please-manifest.json the current version, rewritten on each release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Two pushes to main in quick succession would otherwise race to reconcile the
+# same release PR. Queue instead of cancelling: the loser of a cancelled race
+# leaves the PR describing a commit that is no longer the tip.
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    name: release PR / tag / draft release
+    runs-on: ubuntu-latest
+    permissions:
+      # Creating the release branch, the tag and the draft release.
+      contents: write
+      # Opening and updating the release pull request.
+      pull-requests: write
+
+    steps:
+      # A token is the one piece of this that is not in the repository, and its
+      # absence fails silently in a way that is hard to spot: everything below
+      # still works, but nothing *downstream* of it does. Say so out loud.
+      - name: Check the release token is configured
+        env:
+          TOKEN_SET: ${{ secrets.RELEASE_PLEASE_TOKEN != '' }}
+        run: |
+          if [ "$TOKEN_SET" = "true" ]; then
+            echo "RELEASE_PLEASE_TOKEN is set"
+          else
+            echo "::warning::RELEASE_PLEASE_TOKEN is not set. Falling back to GITHUB_TOKEN, whose refs do not trigger workflows: ci.yml will not run on the release PR, and merging it will not start the macOS build. Run macos.yml manually, or add the secret. See CONTRIBUTING.md."
+          fi
+
+      # Refs created by GITHUB_TOKEN deliberately do not trigger other
+      # workflows, which would break this repository in two places at once: the
+      # release PR would get no CI, and the `v*` tag would never reach
+      # macos.yml, leaving a draft release with no download attached. A PAT is
+      # attributed to a user, so its pushes do trigger.
+      #
+      # The fallback keeps the workflow honest rather than red when the secret
+      # is missing — the release PR is still worth having, and the DMG can be
+      # produced by dispatching macos.yml by hand.
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Cheap, and it turns "did that do anything?" into a line in the log.
+      - name: Summarise
+        env:
+          RELEASE_CREATED: ${{ steps.release.outputs.release_created }}
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
+          PR_CREATED: ${{ steps.release.outputs.prs_created }}
+        run: |
+          if [ "$RELEASE_CREATED" = "true" ]; then
+            echo "cut $TAG_NAME — macos.yml builds the DMG and attaches it to the draft release"
+          elif [ "$PR_CREATED" = "true" ]; then
+            echo "release pull request opened or updated"
+          else
+            echo "nothing releasable since the last tag"
+          fi

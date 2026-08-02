@@ -123,17 +123,22 @@ Types in use: `feat`, `fix`, `chore`, `style`, `revert`, `docs`, `refactor`,
 `(pwa)`, `(ui)`, `(demo)`, `(ci)` — and are optional on changes that genuinely
 cut across everything.
 
-Two things worth knowing:
+Three things worth knowing:
 
 - **Bodies carry the reasoning.** The subject says what changed; the body says
   why, what you measured, and what you rejected. `git log` here reads as a
   design record, and that is deliberate — wrap at 72 columns and write prose.
 - **Breaking changes are marked**, either `feat!:` or a `BREAKING CHANGE:`
-  footer. That is what turns a release into a major bump, so it is the one
-  convention that changes a version number.
+  footer.
+- **The type is the release.** `feat`, `fix`, `perf` and `revert` are what
+  release-please turns into a version bump and a changelog line; `docs`,
+  `chore`, `refactor`, `test`, `build`, `ci` and `style` are invisible to it and
+  release nothing. Calling a fix a `chore` does not make it tidier, it makes it
+  unreleased.
 
-Nothing enforces this — there is no commitlint and no hook. It holds because
-people follow it.
+No commitlint and no hook enforce the shape of the subject. What does have
+teeth is the type, and only after the fact: get it wrong and the change ships
+under the wrong number, or does not ship at all.
 
 ## Releases
 
@@ -144,63 +149,98 @@ to `main`; there is no version gate, no tag, no changelog entry. `ci.yml`
 deliberately has no deploy step so the two never fight (see `docs/deploy.md`).
 
 **A `v*` tag is a milestone.** It builds the macOS DMG through
-`.github/workflows/macos.yml` and opens a draft GitHub Release whose body is the
-CHANGELOG section for that version. It does not affect the web app at all.
+`.github/workflows/macos.yml` and attaches it to a draft GitHub Release whose
+body is the CHANGELOG section for that version. It does not affect the web app
+at all.
 
-Versions follow [SemVer](https://semver.org/spec/v2.0.0.html) and the changelog
-follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Versions follow [SemVer](https://semver.org/spec/v2.0.0.html), and
+[release-please](https://github.com/googleapis/release-please) derives them from
+the commit log: `feat` bumps the minor, `fix`, `perf` and `revert` the patch,
+and every other type releases nothing at all.
+
+Pinch is pre-1.0, so `bump-minor-pre-major` is on and a breaking change bumps
+the minor rather than the major. Reaching `1.0.0` should be a decision, not the
+side effect of one `feat!:`.
 
 ### The version lives in one place
 
-`package.json` is the only file a human edits. Everything else derives from it:
+`package.json` is the source of truth, and nobody types into it by hand either.
+Everything else derives from it:
 
 | Surface | How it gets the version |
 | --- | --- |
 | The UI (footer ticker, Settings → About) | `APP_VERSION` from `$lib/contracts`, frozen in by the `define` block in `vite.config.ts` |
 | The macOS bundle, the DMG filename, **App → About Pinch** | `src-tauri/tauri.conf.json`, whose `version` is the *path* `../package.json` |
-| `src-tauri/Cargo.toml`, both lockfiles | rewritten by `scripts/release.mjs` |
+| `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `.release-please-manifest.json` | rewritten by release-please, per the `extra-files` list in `release-please-config.json` |
 
 So never type a version number into a component, a config or a doc.
 `src/lib/contracts/version.test.ts` runs in CI and fails the suite if any of
 those surfaces drifts — including if someone replaces the Tauri indirection with
-a literal.
+a literal. Those checks run on the release pull request too, so a file that
+release-please has been told to forget goes red before the tag exists.
+
+One entry in that config needs explaining, because JSON cannot carry a comment.
+`Cargo.lock` pins every transitive dependency at its own version and only one of
+those entries is ours, so its updater selects by name:
+
+```
+$.package[?(@.name.value=='pinch')].version
+```
+
+`.value` is not a typo. release-please parses TOML into a tree where every leaf
+is `{start, end, value}` — byte offsets, so it can rewrite one value in place
+without reformatting the file — and the filter runs against that tree, not
+against the plain document. Written the obvious way the filter matches nothing,
+release-please logs a warning rather than failing, and `Cargo.lock` would be
+left behind at the old version. The Cargo.lock assertion in `version.test.ts`
+exists for exactly that failure.
 
 ### Cutting one
 
-1. **Keep `## [Unreleased]` current as you go.** Add to it in the PR that
-   changes behaviour, not in a scramble at release time. `scripts/release.mjs`
-   refuses to run if that section is empty, so a release without notes is
-   impossible by construction.
-2. From a clean, up-to-date `main`:
-
-   ```sh
-   npm run release minor             # major | minor | patch | an explicit x.y.z
-   npm run release minor -- --dry-run   # see what it would do first
-   ```
-
-   Note the `--` before `--dry-run`: without it npm recognises the flag as one of
-   its own and swallows it. The script also reads npm's `npm_config_dry_run`, so
-   the shorter spelling is safe too, but `--` is the form to teach.
-
-   It checks the preconditions, runs `check` and `test`, bumps `package.json`
-   (and the lockfile) plus the Cargo crate, promotes `## [Unreleased]` to a
-   dated heading with its link reference, then commits `chore(release): vX.Y.Z`
-   and creates an annotated tag carrying the notes. If anything fails part-way,
-   every file it had rewritten is restored.
-3. It stops there on purpose. Read the diff, then push `main` and the one tag —
-   an explicit refspec, because `--follow-tags` would also publish any other
-   stray local `v*` tag and start a second release build:
-
-   ```sh
-   git push origin main vX.Y.Z
-   ```
-4. The macOS workflow verifies the tag matches `package.json`, re-runs
-   `check`/`test`, builds the universal DMG and opens a **draft** release.
-   Review the download and the notes, then publish it.
+1. **Nothing to do as you go.** Write good Conventional Commit subjects and
+   bodies; that is the input. `CHANGELOG.md` has no `Unreleased` section any
+   more, and editing it in a feature PR only creates a conflict with the release
+   PR.
+2. release-please keeps a pull request titled **chore(main): release x.y.z**
+   open on `main`, rebuilding it on every push. It carries the bumped files and
+   a CHANGELOG section drafted from the commit subjects.
+3. **Rewrite that section before merging.** The generated bullets are raw
+   material — a list of subjects with commit links. The changelog here is an
+   editorial document, grouped by theme, written for someone deciding whether to
+   care about this version. Push your edit onto the release branch; release-please
+   preserves it unless new commits land on `main`, in which case re-apply.
+4. Merge it. That commits the bump, creates the `vX.Y.Z` tag and opens a
+   **draft** GitHub Release. Draft releases normally have no tag until they are
+   published, so `force-tag-creation` is on — without it the tag would never
+   exist and the macOS build would never start.
+5. The macOS workflow verifies the tag matches `package.json`, re-runs
+   `check`/`test`, builds the universal DMG, attaches it to that draft release
+   and replaces the body with your edited CHANGELOG section. Review the download,
+   then publish it.
 
 macOS builds are unsigned and un-notarised, and the Tauri updater is not
 enabled, so a new version means downloading a new DMG. `macos.yml` documents the
 exact secrets that would change that.
+
+### `RELEASE_PLEASE_TOKEN`
+
+Refs pushed by `GITHUB_TOKEN` deliberately do not trigger workflows, which would
+break the chain above in two places: the release PR would get no CI, and the tag
+would never reach `macos.yml`, leaving a draft release with nothing to download.
+So `release.yml` authenticates with a repository secret named
+`RELEASE_PLEASE_TOKEN` — a fine-grained personal access token scoped to this
+repository with **Contents: read and write** and **Pull requests: read and
+write**.
+
+It falls back to `GITHUB_TOKEN` when the secret is absent, and logs a warning
+saying so. A release cut that way is recoverable: dispatch `macos.yml` by hand
+once the tag exists.
+
+`release-please-config.json` also carries `last-release-sha`, pointing at the
+`v0.1.0` commit. `v0.1.0` was tagged before any of this existed and has no
+GitHub Release, so without it release-please would look past the tag and read
+the whole history as unreleased. It can be dropped once a release it did create
+is the most recent one.
 
 ## Opening a PR
 
@@ -210,8 +250,9 @@ exact secrets that would change that.
 - `npm run check` and `npm test` must both be green.
 - Describe what changed and why in the PR description; link the issue it
   closes, if any.
-- Add a line to `## [Unreleased]` in `CHANGELOG.md` if the change is one a user
-  would notice.
+- Leave `CHANGELOG.md` alone. release-please writes it from your commit
+  subjects, so a change a user would notice needs a `feat:` or `fix:` subject
+  that reads well on its own — not a changelog edit.
 - If you're adding or changing behavior a reader can see, say how you
   verified it (which codec/image/browser you tried it against) — there's no
   CI screenshot bot here to do that for you.
