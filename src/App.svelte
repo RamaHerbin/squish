@@ -103,17 +103,6 @@
     hooks,
   };
 
-  /**
-   * Handed to the editor so auto-suggest probes through the same codecs the
-   * sessions encode with. Structurally typed at the call site — `EditorView`
-   * owns the shape.
-   */
-  const pipeline = {
-    createBridge: createDefaultWorkerBridge,
-    hooks,
-    registry: ENCODER_REGISTRY,
-  };
-
   // Configure immediately so a drop during start-up still works; the async pass
   // below reconfigures with the restored settings.
   appState.configure(baseConfig);
@@ -617,7 +606,7 @@
         {#key activeTab.id}
           <EditorView
             session={activeTab.session}
-            {pipeline}
+            registry={ENCODER_REGISTRY}
             ondirty={() => tabs.markDirty(activeTab.id, true)}
           />
         {/key}

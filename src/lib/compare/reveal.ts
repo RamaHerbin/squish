@@ -232,30 +232,6 @@ export function parseZoomScale(text: string): number | null {
 /* -------------------------------------------------------------------------- */
 
 /**
- * `<AutoPill />` — the top-centre suggestion strip: blue `AUTO` segment,
- * message, then either a static "Applied" read-out or an action button.
- * Renders nothing unless {@link AutoPillProps.open} is true.
- */
-export interface AutoPillProps {
-  /** Hidden until this is true. Default `false`. */
-  open?: boolean;
-  /** The sentence in the middle. */
-  message: string;
-  /** Left segment text. Default `Auto`. */
-  label?: string;
-  /** Right segment text. Default `Applied`. */
-  actionLabel?: string;
-  /** Given, the right segment becomes a button. Omitted, it is a read-out. */
-  onaction?: () => void;
-  /** Left segment fill. Default `blue`. */
-  accent?: AccentName | string;
-  /** Announce changes to assistive tech. Default `true`. */
-  live?: boolean;
-  compact?: boolean;
-  class?: string;
-}
-
-/**
  * `<ZoomPill />` — the bottom-centre viewport bar:
  * `− | 100% | + | FIT | 1:1` plus rotate and crop when those callbacks exist.
  *
@@ -335,13 +311,6 @@ export interface RevealCompareProps {
   outputMeta?: string;
   /** Hide both read-out cards. Default `true` (shown). */
   showInfo?: boolean;
-
-  /** Auto-suggestion strip. Hidden unless `autoOpen`. */
-  autoOpen?: boolean;
-  autoMessage?: string;
-  autoLabel?: string;
-  autoActionLabel?: string;
-  onauto?: () => void;
 
   /** Show the zoom pill. Default `true`. */
   showZoom?: boolean;

@@ -23,9 +23,9 @@
  * ```
  *
  * `RevealCompare` is the whole surface: two canvases under one shared pan/zoom
- * transform, the reveal divider, the read-out cards and the floating pills.
- * `AutoPill` / `ZoomPill` are exported for anything that wants to place them
- * elsewhere, and `reveal.ts` holds the pure maths behind all of it.
+ * transform, the reveal divider, the read-out cards and the floating pill.
+ * `ZoomPill` is exported for anything that wants to place it elsewhere, and
+ * `reveal.ts` holds the pure maths behind all of it.
  *
  * The pre-redesign surface (`CompareView` / `TwoUp` / `PinchZoom` and their
  * `types.ts`) was deleted with the redesign — `pinch-zoom.ts` survives it and
@@ -33,7 +33,6 @@
  */
 
 export { default as RevealCompare } from './RevealCompare.svelte';
-export { default as AutoPill } from './AutoPill.svelte';
 export { default as ZoomPill } from './ZoomPill.svelte';
 export { default as OutputCanvas } from './OutputCanvas.svelte';
 

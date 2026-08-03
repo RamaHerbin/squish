@@ -33,7 +33,6 @@
   import CropOverlay from '../edit/CropOverlay.svelte';
   import { InfoCard, accentFill } from '../ui';
 
-  import AutoPill from './AutoPill.svelte';
   import OutputCanvas from './OutputCanvas.svelte';
   import ZoomPill from './ZoomPill.svelte';
   import { needsContainFit } from './canvas';
@@ -74,11 +73,6 @@
     outputDeltaTone = 'yellow',
     outputMeta,
     showInfo = true,
-    autoOpen = false,
-    autoMessage = '',
-    autoLabel = 'Auto',
-    autoActionLabel = 'Applied',
-    onauto,
     showZoom = true,
     onrotate,
     oncrop,
@@ -497,19 +491,6 @@
     {#if compactOutputText}<span class="tag tag-output">{compactOutputText}</span>{/if}
   {/if}
 
-  {#if autoMessage}
-    <div class="auto-slot">
-      <AutoPill
-        open={autoOpen}
-        message={autoMessage}
-        label={autoLabel}
-        actionLabel={autoActionLabel}
-        onaction={onauto}
-        {compact}
-      />
-    </div>
-  {/if}
-
   {#if showZoom}
     <div class="zoom-slot">
       <ZoomPill
@@ -770,26 +751,12 @@
 
   /* ---- floating controls -------------------------------------------- */
 
-  .auto-slot {
-    position: absolute;
-    top: 20px;
-    left: 50%;
-    z-index: 3;
-    max-width: min(560px, calc(100% - 40px));
-    transform: translateX(-50%);
-  }
-
   .zoom-slot {
     position: absolute;
     bottom: 20px;
     left: 50%;
     z-index: 3;
     transform: translateX(-50%);
-  }
-
-  .compact .auto-slot {
-    top: 62px;
-    max-width: calc(100% - 28px);
   }
 
   .compact .zoom-slot {
