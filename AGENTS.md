@@ -28,8 +28,10 @@ npm run tauri:dev  # native window against the dev server
 npm run tauri:build
 
 node scripts/generate-assets.mjs [icons|og|demo|pdf|hdr|shots|macos]   # binary assets
-npm run release <major|minor|patch|x.y.z> [-- --dry-run]        # cut a version
 ```
+
+There is no release command. release-please keeps a release pull request open on
+`main`; merging it is the release.
 
 `npm run check` and `npm test` are the gate. Run both before claiming anything
 works.
@@ -72,11 +74,14 @@ component, a config or a doc.**
 
 - UI reads `APP_VERSION` from `$lib/contracts` (injected by `vite.config.ts`)
 - `src-tauri/tauri.conf.json` sets `version` to the *path* `../package.json`
-- `src-tauri/Cargo.toml` and the lockfiles are rewritten by `scripts/release.mjs`
+- `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and
+  `.release-please-manifest.json` are rewritten by release-please, per
+  `release-please-config.json`
 
 `src/lib/contracts/version.test.ts` fails the suite if any surface drifts, or if
-someone replaces the Tauri path with a literal. To bump, use `npm run release`;
-see the Releases section of CONTRIBUTING.md.
+someone replaces the Tauri path with a literal. **Never bump the version
+yourself** — release-please owns every one of those files. See the Releases
+section of CONTRIBUTING.md.
 
 ## Generated assets — regenerate, never hand-edit
 
@@ -115,6 +120,12 @@ trailing period. Write a real body explaining why, what you measured, and what
 you rejected; `git log` here is a design record. Mark breaking changes with
 `feat!:` or a `BREAKING CHANGE:` footer.
 
-Add a line to `## [Unreleased]` in `CHANGELOG.md` for anything a user would
-notice. Keep PRs to one change. State how you verified it — there is no
-screenshot bot.
+The convention is load-bearing, not decorative: release-please reads these
+subjects to decide the next version and to draft the CHANGELOG section. `feat`,
+`fix`, `perf` and `revert` appear in the changelog and move the number —
+`docs`, `chore`, `refactor`, `test`, `build`, `ci` and `style` are hidden and
+release nothing. So do not reach for `chore` when the change is a fix.
+
+**Do not edit `CHANGELOG.md`.** release-please writes it in the release pull
+request, where it is rewritten by hand before merging. Keep PRs to one change.
+State how you verified it — there is no screenshot bot.

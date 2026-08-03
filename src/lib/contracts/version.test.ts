@@ -11,6 +11,11 @@ import { APP_VERSION, APP_VERSION_TAG } from './version';
  * `npm test`, so a surface that drifts fails the suite instead of shipping a
  * build that reports the wrong number.
  *
+ * Since release-please took over the bump, the pull request it opens is itself
+ * subject to these — which is the point. A missing entry in the `extra-files`
+ * list of `release-please-config.json` shows up as a red check on the release
+ * PR, before the tag exists, rather than as a stale number in a shipped DMG.
+ *
  * Deliberately reads the files off disk rather than importing them, so it
  * checks what is committed rather than what a bundler resolved.
  */
@@ -37,12 +42,37 @@ describe('app version', () => {
   it('matches the Cargo crate version', () => {
     // Only metadata now — the macOS About panel reads tauri.conf.json, not the
     // crate — but a stale crate version is confusing in cargo output, so
-    // `scripts/release.mjs` keeps it in step and this keeps the script honest.
+    // release-please rewrites it through an `extra-files` entry, and this keeps
+    // that entry honest.
     const cargoToml = repoFile('src-tauri/Cargo.toml');
     const pkg = cargoToml.split(/^\[/m).find((section) => section.startsWith('package]'));
     expect(pkg, 'src-tauri/Cargo.toml has no [package] section').toBeDefined();
     const version = /^version\s*=\s*"([^"]+)"/m.exec(pkg ?? '')?.[1];
     expect(version).toBe(packageVersion);
+  });
+
+  it('matches the crate entry in Cargo.lock', () => {
+    // The lockfile lists every dependency at its own version, so anchor on the
+    // `[[package]]` block whose name is the crate rather than the first
+    // `version =` in the file.
+    const cargoLock = repoFile('src-tauri/Cargo.lock');
+    const entry = cargoLock
+      .split(/^\[\[package\]\]$/m)
+      .find((block) => /^name\s*=\s*"pinch"$/m.test(block));
+    expect(entry, 'src-tauri/Cargo.lock has no [[package]] named pinch').toBeDefined();
+    const version = /^version\s*=\s*"([^"]+)"/m.exec(entry ?? '')?.[1];
+    expect(version).toBe(packageVersion);
+  });
+
+  it('matches the version release-please believes it last released', () => {
+    // release-please reads this file to decide what the next version is. If it
+    // ever disagreed with package.json the next release would bump from the
+    // wrong base — a silently skipped or repeated version number.
+    const manifest = JSON.parse(repoFile('.release-please-manifest.json')) as Record<
+      string,
+      string
+    >;
+    expect(manifest['.']).toBe(packageVersion);
   });
 
   it('keeps Tauri pointed at package.json instead of restating the number', () => {

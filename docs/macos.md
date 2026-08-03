@@ -48,16 +48,17 @@ dev server, with hot reload working exactly as it does in a browser tab.
 
 ## Releasing one
 
-You do not have to build locally to get a distributable. Pushing a `v*` tag runs
+You do not have to build locally to get a distributable. A `v*` tag runs
 [`.github/workflows/macos.yml`](../.github/workflows/macos.yml) on a `macos-14` runner,
 which checks that the tag matches `package.json`, re-runs `npm run check` and `npm test`,
-builds the universal bundle, uploads the `.dmg` as a workflow artifact, and opens a
-**draft** GitHub Release with the `CHANGELOG.md` section for that version as its body.
-The draft is deliberate: a human reviews the notes and the download before anything goes
-public.
+builds the universal bundle, uploads the `.dmg` as a workflow artifact, and attaches it to
+the **draft** GitHub Release for that tag — replacing the body with the `CHANGELOG.md`
+section for that version. The draft is deliberate: a human reviews the notes and the
+download before anything goes public.
 
-Cutting the tag is `npm run release <major|minor|patch>` from a clean `main` — see the
-Releases section of [CONTRIBUTING.md](../CONTRIBUTING.md) for the whole sequence.
+Nobody pushes that tag by hand. release-please keeps a release pull request open on
+`main`, and merging it creates both the tag and the draft release — see the Releases
+section of [CONTRIBUTING.md](../CONTRIBUTING.md) for the whole sequence.
 
 ## Opening it the first time
 
