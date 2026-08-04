@@ -12,6 +12,32 @@ Changelog](https://keepachangelog.com/en/1.1.0/) sub-headings and the thematic g
 come from. Editing the section in the release PR is part of cutting a release, not an
 optional extra — see CONTRIBUTING.md.
 
+## [0.2.0](https://github.com/RamaHerbin/squish/compare/v0.1.0...v0.2.0) (2026-08-04)
+
+
+### Added
+
+* **demo:** a real 10-bit PQ HDR sample ([#10](https://github.com/RamaHerbin/squish/issues/10)) ([f4ef1db](https://github.com/RamaHerbin/squish/commit/f4ef1db1b3e6823a88fcf730c6b881d79894b6d6))
+* **demo:** restyle the bundled samples as one editorial series ([#9](https://github.com/RamaHerbin/squish/issues/9)) ([30e57fc](https://github.com/RamaHerbin/squish/commit/30e57fc7996c658747379f4d746d52e239412990))
+* native macOS app (Tauri 2) ([#3](https://github.com/RamaHerbin/squish/issues/3)) ([6628aa0](https://github.com/RamaHerbin/squish/commit/6628aa0337a6d18713aa3c62f25666dcbfc2af1b))
+* **pdf:** full-page before/after preview ([#20](https://github.com/RamaHerbin/squish/issues/20)) ([53f7de3](https://github.com/RamaHerbin/squish/commit/53f7de3e9ca8a93febd073ee502d3423b32113d6))
+* **pdf:** PDF compression UI — analysis, settings, compress, download ([#18](https://github.com/RamaHerbin/squish/issues/18)) ([69a46f5](https://github.com/RamaHerbin/squish/commit/69a46f50158fd126ff06d22b735809d00a31fafc))
+* **pdf:** PDF image-compression engine — analysis + recompress (WIP) ([#13](https://github.com/RamaHerbin/squish/issues/13)) ([29f5c2a](https://github.com/RamaHerbin/squish/commit/29f5c2ac20a6a5d677b3b264d513cc5914a0a088))
+* **share:** send a compressed file to the system share sheet ([#24](https://github.com/RamaHerbin/squish/issues/24)) ([6d0023c](https://github.com/RamaHerbin/squish/commit/6d0023cc5bda2b8f9b60d2321c8431f68654e0d0))
+* **ui:** cursor-flair hover bloom on the home pill buttons ([#7](https://github.com/RamaHerbin/squish/issues/7)) ([6ca6e82](https://github.com/RamaHerbin/squish/commit/6ca6e82916ac90595be033fde0d4a7ee0a06e749))
+
+
+### Fixed
+
+* **ci:** npm ci lockfile validation on Linux runners ([#6](https://github.com/RamaHerbin/squish/issues/6)) ([2a85909](https://github.com/RamaHerbin/squish/commit/2a859099024bb5776a8b391c4649d0e37156e8c6))
+* **codecs:** decode iPhone-screenshot HEICs correctly, via libheif 1.22.2 ([#25](https://github.com/RamaHerbin/squish/issues/25)) ([97b760d](https://github.com/RamaHerbin/squish/commit/97b760dc7ad5dbbce16aa90e231fabb65c1cbb7d))
+* **editor:** remove the Auto-suggest pill ([#27](https://github.com/RamaHerbin/squish/issues/27)) ([268aab3](https://github.com/RamaHerbin/squish/commit/268aab31d349d29224be90f7b06914a4b811f76e))
+* **pdf:** accept shared PDFs, and stop the Paste button lying about them ([#23](https://github.com/RamaHerbin/squish/issues/23)) ([f1c986e](https://github.com/RamaHerbin/squish/commit/f1c986e051aec5121199054595492bea1e215697))
+* **pdf:** one Close, and compress without being asked ([#21](https://github.com/RamaHerbin/squish/issues/21)) ([b902085](https://github.com/RamaHerbin/squish/commit/b9020850e6aa83566742d940293f91a1c45e8e53))
+* **pwa:** reload the page when the update toast's Reload is clicked ([#8](https://github.com/RamaHerbin/squish/issues/8)) ([89d3c15](https://github.com/RamaHerbin/squish/commit/89d3c15ce43f491242411d379a14665503853a51))
+* repair COEP-less cached pthread workers killing threaded codecs ([#19](https://github.com/RamaHerbin/squish/issues/19)) ([50dfefa](https://github.com/RamaHerbin/squish/commit/50dfefa5d13a730d0dd22142b57ee83d12afd433))
+* surface codec-worker failures and preserve wide-gamut display ([#12](https://github.com/RamaHerbin/squish/issues/12)) ([891b2b2](https://github.com/RamaHerbin/squish/commit/891b2b24e03f17d074046c95dcf704b354de8ea2))
+
 ## [0.1.0] — 2026-07-25
 
 Initial public release. Pinch is a client-side image compressor: every codec runs in
