@@ -1,5 +1,5 @@
 <script lang="ts">
-  /** Screen 05, section `/ 01` — the four rows in the comp, verbatim. */
+  /** Screen 05, section `/ 01` — the three rows in the comp, verbatim. */
   import { EditorialSelect, EditorialSlider, EditorialToggle } from '../ui';
   import type { SelectOption } from '../ui';
   import { WORKER_THREADS_RANGE, isEncoderId } from '../contracts';
@@ -45,19 +45,6 @@
         size={38}
         hint={`${SELECTABLE_ENCODER_IDS.length} total`}
         label="Default encoder"
-      />
-    </div>
-
-    <div class="row">
-      <div class="copy">
-        <div class="title">Auto-suggest quality</div>
-        <div class="desc">Picks the smallest encode still above the perceptual threshold.</div>
-      </div>
-      <EditorialToggle
-        checked={appSettings.current.autoSuggest}
-        onValue={(v) => appSettings.setAutoSuggest(v)}
-        size={44}
-        label="Auto-suggest quality"
       />
     </div>
 

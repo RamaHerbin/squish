@@ -1,19 +1,15 @@
 /**
- * Metrics: the SSIM number, the words for it, and the auto-suggest search.
+ * Metrics: the SSIM number and the words for it.
  *
  * ```ts
- * import {
- *   getSharedMetricsClient, captionFor, formatSsim, AutoSuggestController,
- * } from '$lib/metrics';
+ * import { getSharedMetricsClient, captionFor, formatSsim } from '$lib/metrics';
  * ```
  *
- * Three layers, each usable on its own:
+ * Two layers, each usable on its own:
  * - `ssim.ts` — the pure metric. No DOM, no worker; safe anywhere.
  * - `metrics.worker.ts` + `metrics-client.ts` — the same metric off the main
  *   thread, with the codec bridge's lazy-spawn / serialise / abort-is-terminate
  *   behaviour.
- * - `auto-suggest.ts` + `AutoSuggestController.svelte.ts` — the binary search
- *   behind the Auto pill, with encode and measure injected by the caller.
  *
  * Nothing here imports `state/` or `codecs/`.
  */
@@ -65,35 +61,8 @@ export {
   captionFor,
   formatButteraugli,
   formatSsim,
-  isVisuallyIdentical,
   toneAccent,
   verdictAccent,
   verdictFor,
 } from './verdict';
 export type { MetricsAccent, MetricsCaption, Verdict, VerdictTone } from './verdict';
-
-export {
-  AUTO_SUGGEST_DEFAULTS,
-  describeSuggestion,
-  formatBytes,
-  percentOfOriginal,
-  ssimOf,
-  suggestQuality,
-} from './auto-suggest';
-export type {
-  AutoSuggestEncode,
-  AutoSuggestEncodeResult,
-  AutoSuggestMeasure,
-  DescribeSuggestionOptions,
-  QualitySuggestion,
-  SuggestQualityOptions,
-} from './auto-suggest';
-
-export {
-  AutoSuggestController,
-  createAutoSuggestController,
-} from './AutoSuggestController.svelte';
-export type {
-  AutoSuggestControllerOptions,
-  AutoSuggestState,
-} from './AutoSuggestController.svelte';

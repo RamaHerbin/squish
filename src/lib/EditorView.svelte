@@ -13,9 +13,9 @@
    *   └──────────────────────────────────────────────┘
    *
    * Owned by integration rather than by any one feature directory: it is the
-   * only place that knows about `state`, `codecs`, `compare`, `options`,
-   * `metrics`, `edit` and `settings` at once. Everything it renders belongs to
-   * somebody else; what lives here is the wiring.
+   * only place that knows about `codecs`, `compare`, `options`, `metrics` and
+   * `edit` at once. Everything it renders belongs to somebody else; what
+   * lives here is the wiring.
    *
    * ## One config, one reveal
    * Side 0 is pinned to `identity` by the shell when the session is created, so
@@ -34,10 +34,7 @@
    * uncropped pixels and matching `cropImageWidth/Height`, and its own
    * letterbox maths does the viewport ⇄ image mapping.
    */
-  import { onDestroy } from 'svelte';
-
   import type {
-    CreateWorkerBridge,
     CropRect,
     EncoderId,
     EncoderRegistry,
@@ -46,7 +43,6 @@
     MetricsResult,
     RotateAngle,
     SideSettings,
-    WorkerBridgeApi,
   } from './contracts';
   import {
     EXTENSION_BY_MIME,
@@ -56,50 +52,27 @@
   } from './contracts';
 
   import { getCapabilities, hdrLabel, toSrgb } from './codecs';
-  import {
-    createDefaultEngineHooks,
-    effectiveProcessorState,
-    runDecodeOutput,
-    runEncode,
-    runProcess,
-  } from './state';
-  import type { EngineHooks } from './state';
 
   import { RevealCompare } from './compare';
   import { EditorControls, formatBytes, formatSavings, primaryKnob } from './options';
-  import { AutoSuggestController, getSharedMetricsClient } from './metrics';
+  import { getSharedMetricsClient } from './metrics';
   import { createEditState } from './edit/edit.svelte';
   import { rotate as rotateImage } from './edit/transform';
   import { canShareFiles, messageOf, saveBlob, shareFiles } from './platform';
-  import { appSettings } from './settings/settings.svelte';
 
   /** How long the pixels have to sit still before SSIM is worth paying for. */
   const METRICS_DEBOUNCE_MS = 180;
 
-  /**
-   * The codec seam, injected by the shell so this component and the shell's
-   * sessions encode through exactly the same hooks. Auto-suggest needs a
-   * *scratch* pipeline of its own: probing quality must not disturb side 1.
-   *
-   * Structural, and deliberately not exported — the shell hands over a plain
-   * object literal and TypeScript checks the shape at the call site.
-   */
-  interface EditorPipeline {
-    createBridge: CreateWorkerBridge;
-    hooks: Partial<EngineHooks>;
-    registry: EncoderRegistry;
-  }
-
   interface Props {
     /** The active tab's engine. Created and disposed by the app shell. */
     session: JobEngine;
-    /** Injected codec hooks; see {@link EditorPipeline}. */
-    pipeline: EditorPipeline;
+    /** Encoders available to the editor's controls. */
+    registry: EncoderRegistry;
     /** Called the first time the user changes anything — drives the tab dot. */
     ondirty?: () => void;
   }
 
-  let { session, pipeline, ondirty }: Props = $props();
+  let { session, registry, ondirty }: Props = $props();
 
   const st = $derived(session.state);
 
@@ -178,7 +151,7 @@
 
   function encoderLabelFor(id: EncoderId | undefined): string {
     if (!id) return '';
-    return id === 'identity' ? 'Original' : pipeline.registry[id].label;
+    return id === 'identity' ? 'Original' : registry[id].label;
   }
 
   /** `JPEG`, `PNG`, … from the source file's type, falling back to its name. */
@@ -341,117 +314,6 @@
   });
 
   /* ------------------------------------------------------------------ */
-  /* Auto-suggest                                                        */
-  /* ------------------------------------------------------------------ */
-
-  /**
-   * A scratch encode pipeline. The search runs several encodes per suggestion
-   * and must not touch side 1 — otherwise the editor and the search fight over
-   * the same settings and the preview flickers through every probe.
-   */
-  const probeHooks = $derived<EngineHooks>({
-    ...createDefaultEngineHooks(),
-    ...pipeline.hooks,
-  });
-  let probeBridge: WorkerBridgeApi | undefined;
-  /** Reference pixels the last probe was measured against (post-resize). */
-  let probeReference: ImageData | undefined;
-
-  function bridge(): WorkerBridgeApi {
-    probeBridge ??= pipeline.createBridge();
-    return probeBridge;
-  }
-
-  const auto = new AutoSuggestController({
-    encodeAt: async (quality, signal) => {
-      const base = st.sides[0].data;
-      const file = st.source?.file;
-      if (!base || !file) throw new Error('No image to test yet');
-
-      // Plain clone: `latestSettings` is a `$state` proxy and a proxy cannot be
-      // structured-cloned into the codec worker.
-      const settings = cloneSideSettings(primaryKnob(st.sides[1].latestSettings).apply(quality));
-      const scope = signal ?? new AbortController().signal;
-
-      const processed = await runProcess(
-        scope,
-        base,
-        effectiveProcessorState(settings),
-        bridge(),
-        probeHooks,
-      );
-      const encoded = await runEncode(
-        scope,
-        processed,
-        settings,
-        file,
-        bridge(),
-        probeHooks,
-        pipeline.registry,
-        undefined,
-        // No browser fallback in a probe: a silent codec swap would measure the
-        // wrong encoder and poison the auto-suggest binary search.
-        false,
-      );
-      const data = await runDecodeOutput(scope, encoded, bridge(), probeHooks);
-      probeReference = processed;
-      return { size: encoded.size, data };
-    },
-    // Measured against the *processed* pixels, so an active resize compares
-    // like with like instead of resolving to "dimensions differ".
-    measure: (data, _quality, signal) => {
-      const reference = probeReference ?? st.sides[0].data;
-      if (!reference) return Promise.resolve(null);
-      // `data` is the sRGB decode of the probe output; match the reference to it.
-      return metricsClient.measure(toSrgb(reference), data, signal);
-    },
-    encoderLabel: () => encoderLabelFor(st.sides[1].latestSettings.encoderId),
-    originalBytes: () => st.source?.file.size ?? 0,
-    onApply: (suggestion) => {
-      applySettings(cloneSideSettings(primaryKnob(st.sides[1].latestSettings).apply(suggestion.quality)));
-    },
-  });
-
-  /** Only encoders with a real quality dial can be searched. */
-  const autoSearchable = $derived(primaryKnob(st.sides[1].latestSettings).kind === 'quality');
-
-  /**
-   * One suggestion per (file, encoder, probe-input state). Plain, not
-   * `$state`: it guards the effect below and must not retrigger it.
-   */
-  let autoKey: string | undefined;
-
-  $effect(() => {
-    const file = st.source?.file;
-    const encoderId = st.sides[1].latestSettings.encoderId;
-    const ready = st.sides[0].data !== undefined && !st.loading;
-
-    if (!appSettings.current.autoSuggest || !autoSearchable || !ready || !file) return;
-
-    // Everything that changes the pixels the probe encodes must be in the
-    // key, or a stale suggestion survives a crop/resize change.
-    const key = [
-      file.name,
-      file.size,
-      file.lastModified,
-      encoderId,
-      st.preprocessorState.rotate,
-      JSON.stringify(st.preprocessorState.crop ?? null),
-      JSON.stringify(st.sides[1].latestSettings.processorState.resize),
-    ].join(':');
-    if (key === autoKey) return;
-    autoKey = key;
-    auto.reset();
-    void auto.run();
-  });
-
-  function handleAuto(): void {
-    if (auto.state === 'running') auto.cancel();
-    else if (auto.state === 'error') void auto.run();
-    else auto.apply();
-  }
-
-  /* ------------------------------------------------------------------ */
   /* Download and share                                                  */
   /* ------------------------------------------------------------------ */
 
@@ -497,16 +359,6 @@
     });
   }
 
-  /* ------------------------------------------------------------------ */
-  /* Teardown                                                            */
-  /* ------------------------------------------------------------------ */
-
-  onDestroy(() => {
-    auto.dispose();
-    probeBridge?.terminate();
-    probeBridge = undefined;
-    probeReference = undefined;
-  });
 </script>
 
 <div class="editor">
@@ -537,10 +389,6 @@
       outputDeltaTone={outputDeltaTone}
       outputMeta={outputMeta}
       placeholder={st.loading ? 'Decoding…' : 'No image open'}
-      autoOpen={auto.visible}
-      autoMessage={auto.message ?? ''}
-      autoActionLabel={auto.actionLabel ?? ''}
-      onauto={handleAuto}
       onrotate={handleRotate}
       {editState}
       cropImageWidth={rotatedSize.width}
@@ -551,7 +399,7 @@
   </div>
 
   <EditorControls
-    registry={pipeline.registry}
+    {registry}
     {supportedEncoderIds}
     settings={st.sides[1].latestSettings}
     onchange={applySettings}

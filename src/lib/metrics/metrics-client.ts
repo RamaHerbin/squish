@@ -322,8 +322,8 @@ let shared: MetricsClient | undefined;
  *
  * Unlike the codec bridge this one is safe to share: measurements are
  * stateless and serialised, and an abort only costs the other callers a
- * respawn, not a warm wasm module. The editor, the matrix sweep and
- * auto-suggest all use it so there is never more than one metrics worker alive.
+ * respawn, not a warm wasm module. The editor and the matrix sweep both use
+ * it so there is never more than one metrics worker alive.
  */
 export function getSharedMetricsClient(): MetricsClient {
   if (!shared) shared = createMetricsClient();

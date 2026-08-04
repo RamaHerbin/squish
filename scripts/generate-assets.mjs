@@ -1211,26 +1211,6 @@ async function buildScreenshots(browser) {
         timeout: 180_000,
       });
     await ssimSettled();
-
-    // Accept the app's own quality suggestion, so the shot shows a settled,
-    // recommended state instead of the untouched default. The pill's button is
-    // "Cancel" while the probe is still running and "Applied" afterwards —
-    // clicking anything but "Apply" would cancel the suggestion, hence the
-    // label check.
-    const action = page.locator('.auto-pill button');
-    const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline) {
-      if ((await action.count()) === 0) break;
-      const label = (await action.first().innerText()).trim();
-      if (/^applied$/i.test(label)) break;
-      if (/^apply$/i.test(label)) {
-        await action.first().click();
-        await page.waitForTimeout(1500);
-        await ssimSettled();
-        break;
-      }
-      await page.waitForTimeout(500);
-    }
     await page.waitForTimeout(2500);
 
     const editor = p('docs/media/editor.png');

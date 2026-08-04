@@ -95,14 +95,6 @@ export function captionFor(ssim: number | null): MetricsCaption {
   return caption('heavy');
 }
 
-/**
- * True when the encode is at or above the "safe default" cut point — the test
- * behind "is visually identical" in the Auto pill.
- */
-export function isVisuallyIdentical(ssim: number | null): boolean {
-  return ssim !== null && !Number.isNaN(ssim) && ssim >= THRESHOLDS.good;
-}
-
 /* -------------------------------------------------------------------------- */
 /* Formatting                                                                  */
 /* -------------------------------------------------------------------------- */

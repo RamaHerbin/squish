@@ -11,7 +11,7 @@ src/
    ├─ contracts/              types + pure helpers. Imports nothing outside this dir.
    ├─ codecs/                 the codec worker, its bridge, decode chain, capabilities
    ├─ state/                  the job engine (diff → pipeline → cache), app/tab state
-   ├─ metrics/                SSIM worker + client, auto-suggest search
+   ├─ metrics/                SSIM worker + client
    ├─ matrix/                 the codec sweep
    ├─ batch/                  queue, lanes, OPFS staging, zip export
    ├─ presets/                preset library, URL token codec
@@ -274,7 +274,7 @@ an engine itself — `App.svelte` injects `createSession`/`disposeSession`, whic
 
 ---
 
-## 4. Metrics and auto-suggest
+## 4. Metrics
 
 ### The metric
 
@@ -308,24 +308,6 @@ original and preview pixels intact. `measure()` only ever rejects on abort; ever
 else (mismatched dimensions because resize is on, a broken worker) resolves as
 `{ ssim: null, error }`, because "could not measure" is a displayable state (`SSIM —`),
 not an exception.
-
-### Auto-suggest
-
-`src/lib/metrics/auto-suggest.ts` encodes nothing and measures nothing itself: both
-capabilities are injected, which is what keeps the search free of any import from
-`state/` or `codecs/` and testable with two fakes.
-
-SSIM is monotone non-decreasing in quality for every encoder shipped here, so the
-smallest acceptable quality is a binary-search boundary. Defaults
-(`AUTO_SUGGEST_DEFAULTS`): target SSIM 0.99, range q30–q95, at most 6 probes — each
-probe one encode plus one measurement. If nothing in range clears the target, the best
-probe seen is returned with `met: false`, so the pill can say what actually happened
-rather than rejecting.
-
-`AutoSuggestController.svelte.ts` owns only the *state* of a suggestion (running / done
-/ failed, the sentence, whether the user applied it). Runs supersede each other: calling
-`run()` again aborts the one in flight and a late result from a superseded run is
-dropped rather than flashing on screen.
 
 ---
 
@@ -644,11 +626,11 @@ codecs.
 
 ## 10. Testing
 
-`npm test` runs vitest with no browser: 550+ unit tests across 30 files, colocated with
+`npm test` runs vitest with no browser: 600+ unit tests across 32 files, colocated with
 the code they cover (`*.test.ts` next to the module). That is possible because of the
 injection discipline described above — the job engine takes a fake bridge, the matrix
-takes a fake metrics function, auto-suggest takes two fakes, `PdfJob` takes a fake
-renderer, and the pure modules (`ssim.ts`, `rotate.ts`, `reveal.ts`, `pinch-zoom.ts`,
+takes a fake metrics function, `PdfJob` takes a fake renderer, and the pure modules
+(`ssim.ts`, `rotate.ts`, `reveal.ts`, `pinch-zoom.ts`,
 `pdf/plan.ts`, the `fitScale`/`clampPageIndex` half of `pdf/render.ts`, everything in
 `contracts/`) need nothing at all. One suite opts into jsdom explicitly with
 `// @vitest-environment jsdom`.

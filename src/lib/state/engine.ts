@@ -536,9 +536,9 @@ function browserFallbackFor(
  * one via `onFallback` so the UI can flag the degraded output. avif/jxl/qoi
  * have no browser encoder, so the worker error propagates.
  *
- * `allowFallback` must be `false` for probe encodes (auto-suggest, matrix): a
+ * `allowFallback` must be `false` for probe encodes (the matrix sweep): a
  * silent codec swap mid-search measures the wrong encoder and poisons the
- * binary search, so those callers want the raw worker failure instead.
+ * binary search, so that caller wants the raw worker failure instead.
  */
 export async function runEncode(
   signal: AbortSignal,

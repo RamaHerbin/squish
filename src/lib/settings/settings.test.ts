@@ -21,14 +21,12 @@ describe('sanitizeAppSettings (pure)', () => {
   it('copies across only recognised, well-typed keys', () => {
     const result = sanitizeAppSettings({
       defaultEncoder: 'mozjpeg',
-      autoSuggest: false,
       keepExif: true,
       workerThreads: 6,
       extraJunk: 'ignored',
     });
     expect(result).toEqual({
       defaultEncoder: 'mozjpeg',
-      autoSuggest: false,
       keepExif: true,
       workerThreads: 6,
     });
@@ -37,7 +35,6 @@ describe('sanitizeAppSettings (pure)', () => {
   it('falls back per-field when a value has the wrong shape', () => {
     const result = sanitizeAppSettings({
       defaultEncoder: 'not-a-real-encoder',
-      autoSuggest: 'yes',
       keepExif: 1,
       workerThreads: 'lots',
     });
@@ -85,7 +82,6 @@ describe('createAppSettingsStore', () => {
     await settings.ready;
     expect(settings.current.defaultEncoder).toBe('jxl');
     expect(settings.current.workerThreads).toBe(2);
-    expect(settings.current.autoSuggest).toBe(DEFAULT_APP_SETTINGS.autoSuggest);
   });
 
   it('persists setter calls, debounced', async () => {
@@ -97,16 +93,14 @@ describe('createAppSettingsStore', () => {
       await settings.ready;
 
       settings.setWorkerThreads(8);
-      settings.setAutoSuggest(false);
       expect(settings.current.workerThreads).toBe(8);
-      expect(settings.current.autoSuggest).toBe(false);
       // Debounced: no write yet.
       expect(setSpy).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(60);
       expect(setSpy).toHaveBeenCalledTimes(1);
       const saved = await store.get('app-settings');
-      expect(saved).toMatchObject({ workerThreads: 8, autoSuggest: false });
+      expect(saved).toMatchObject({ workerThreads: 8 });
     } finally {
       vi.useRealTimers();
     }

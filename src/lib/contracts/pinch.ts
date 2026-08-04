@@ -264,8 +264,6 @@ export interface MatrixSweepResult {
 export interface AppSettings {
   /** Applied the moment a file lands, before the user touches anything. */
   defaultEncoder: EncoderId;
-  /** Pick the smallest encode still above the perceptual threshold. */
-  autoSuggest: boolean;
   /** Off strips camera, location and copyright tags from the output. */
   keepExif: boolean;
   /** Codec worker pool size. */
@@ -277,7 +275,6 @@ export const WORKER_THREADS_RANGE = { min: 1, max: 16, step: 1 } as const;
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultEncoder: 'avif',
-  autoSuggest: true,
   keepExif: false,
   workerThreads: 4,
 };
