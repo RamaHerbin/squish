@@ -98,8 +98,7 @@ what you should use if you are tuning an encoder.
 Pinch uses SSIM because of where the number is needed:
 
 - on **every slider commit**, so the verdict updates as you drag;
-- on **every one of the 20 matrix cells**;
-- **six times per auto-suggest run**, inside a binary search.
+- on **every one of the 20 matrix cells**.
 
 At that call rate the cost has to be a few tens of milliseconds, not a few hundred, and
 it has to run without another multi-megabyte wasm module in the critical path. The
@@ -108,9 +107,9 @@ windows, with images box-averaged down to a 2 MP budget first — pure arithmeti
 worker, no codec involved.
 
 The properties the UI actually depends on are: it returns exactly 1 for identical
-inputs, it is monotone in quality (which is what makes the auto-suggest binary search
-valid), and it is stable enough that the same image scores the same twice. SSIM delivers
-those. The extra fidelity of butteraugli would not change a single decision the interface
+inputs, it is monotone in quality (a verdict never gets worse as you raise the slider),
+and it is stable enough that the same image scores the same twice. SSIM delivers those.
+The extra fidelity of butteraugli would not change a single decision the interface
 offers you.
 
 `MetricsResult` has an optional `butteraugli` field for the day that trade-off changes.
@@ -139,7 +138,7 @@ Usually one of:
   produces a much larger file than the JPEG you started from. Both are for graphics and
   screenshots.
 - **Quality set very high.** Above roughly q95 every codec spends bytes on detail nobody
-  can see, which is exactly why auto-suggest caps its search at 95.
+  can see.
 
 The Original side of the compare is always available for download unchanged, so a bad
 trade costs you nothing.
@@ -249,10 +248,10 @@ What is shared:
     encoder options, the way Squoosh does, so the checkbox and the slider always agree.
 
 Everything else is new: the job engine and its work diffing, the reveal compare surface,
-SSIM and verdicts, auto-suggest, the codec matrix, the batch queue with OPFS staging and
-ZIP export, tabs, presets and preset sharing, HEIC input, HDR detection, crop, and the
-entire design system. No Squoosh source tree is vendored, and the stack is different
-(Svelte 5 runes and Vite 8 rather than Preact and Webpack).
+SSIM and verdicts, the codec matrix, the batch queue with OPFS staging and ZIP export,
+tabs, presets and preset sharing, HEIC input, HDR detection, crop, and the entire design
+system. No Squoosh source tree is vendored, and the stack is different (Svelte 5 runes
+and Vite 8 rather than Preact and Webpack).
 
 Squoosh still does things Pinch does not — palette quantization with dithering, an
 experimental WebP v2 encoder, translations, and a track record measured in years. The

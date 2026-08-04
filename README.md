@@ -61,8 +61,6 @@ the app works with the network switched off once it has been loaded.
   dedicated worker and reported with a plain-language verdict (`Excellent`, `Soft`,
   `Watch skies`…). Unmeasurable cases (resize on, so the grids differ) say
   `Unmeasured` instead of guessing.
-- **Auto-suggest** — binary-searches the lowest quality that still reaches the SSIM
-  target (0.99 by default) between q30 and q95, in at most six encodes.
 - **Codec matrix** — MozJPEG, WebP, AVIF, JPEG XL and OxiPNG × four steps, 20 cells of
   size, savings, SSIM and verdict, with one recommended cell you can apply in a click.
   Rows are dealt to worker lanes so each lane keeps one codec warm.
@@ -99,7 +97,6 @@ Pinch does not.
 | Codecs (wasm) | AVIF, JPEG XL, WebP, MozJPEG, OxiPNG, QOI | AVIF, JPEG XL, WebP, WebP v2 (experimental), MozJPEG, OxiPNG, QOI |
 | Batch / folder queue | Yes, with ZIP export | No — one image at a time |
 | Quality metrics | SSIM per encode, in a worker, with verdicts | No |
-| Auto-suggest quality | Yes — binary search to an SSIM target | No |
 | Codec matrix sweep | Yes — 5 encoders × 4 steps in one table | No |
 | HEIC/HEIF input | Yes (libheif) | No |
 | PDF compression | Yes — recompresses embedded images, with a page before/after | No |

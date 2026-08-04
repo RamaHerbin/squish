@@ -1,6 +1,6 @@
 /**
- * Structural similarity, the number behind the editor's `SSIM 0.994` cell, the
- * matrix cells and the Auto pill.
+ * Structural similarity, the number behind the editor's `SSIM 0.994` cell and
+ * the matrix cells.
  *
  * Pure and dependency-free: no DOM, no worker, no `ImageData` constructor — it
  * reads `{ data, width, height }` and returns plain values, so the whole file

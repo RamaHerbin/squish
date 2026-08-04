@@ -108,7 +108,6 @@ export function sanitizeAppSettings(value: unknown): AppSettings {
   if (!isRecord(value)) return out;
 
   if (isEncoderId(value['defaultEncoder'])) out.defaultEncoder = value['defaultEncoder'];
-  if (typeof value['autoSuggest'] === 'boolean') out.autoSuggest = value['autoSuggest'];
   if (typeof value['keepExif'] === 'boolean') out.keepExif = value['keepExif'];
   if (typeof value['workerThreads'] === 'number') {
     out.workerThreads = clampWorkerThreads(value['workerThreads']);
@@ -126,7 +125,6 @@ export interface AppSettingsStore {
   /** Resolves once the initial IndexedDB read has settled. */
   readonly ready: Promise<void>;
   setDefaultEncoder(id: AppSettings['defaultEncoder']): void;
-  setAutoSuggest(value: boolean): void;
   setKeepExif(value: boolean): void;
   setWorkerThreads(value: number): void;
   /** Back to {@link DEFAULT_APP_SETTINGS}, persisted immediately. */
@@ -198,9 +196,6 @@ export function createAppSettingsStore(
 
     setDefaultEncoder(id) {
       patch({ defaultEncoder: id });
-    },
-    setAutoSuggest(next) {
-      patch({ autoSuggest: next });
     },
     setKeepExif(next) {
       patch({ keepExif: next });
